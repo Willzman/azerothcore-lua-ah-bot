@@ -495,6 +495,8 @@ end
 -- Weighted item pools, built once from itemCache on first use. Each pool lists every item once and
 -- caps how many times an item may be picked per cycle, instead of storing an item once per weight point.
 -- Gear and consumables are split into level brackets so listings can follow active players' levels.
+-- Items without a level requirement form their own bracket, which keeps its share whatever the players' levels.
+local NoLevelBracket = -1
 local itemPools
 local playerLevelShares -- Share of recently active players per level bracket, refreshed every sell cycle
 
@@ -553,7 +555,7 @@ local function BuildItemPools()
     end
 
     for _, item in pairs(itemCache) do
-        local bracket = GetLevelBracket(item.RequiredLevel)
+        local bracket = item.RequiredLevel > 0 and GetLevelBracket(item.RequiredLevel) or NoLevelBracket
         if ItemWeights.SpecificItems[item.entry] then
             local weight = ItemWeights.SpecificItems[item.entry]
             addToPool("SpecificItems", weight, item, weight)
@@ -603,17 +605,19 @@ local function BuildItemPools()
     return pools
 end
 
--- Weight of a level bracket pool: its category weight split by item count, shifted towards active players' levels
+-- Weight of a level bracket pool: its category weight split by item count, shifted towards active players' levels.
+-- Only the share of items with a level requirement shifts; items without one keep their share.
 local function GetBracketPoolWeights()
     local weights = {}
     local playerShareTotals = {}
+    local noLevelShares = {}
     local strength = (MatchPlayerLevels and playerLevelShares) and MatchPlayerLevels or 0
 
-    if strength > 0 then
-        for _, pool in ipairs(itemPools) do
-            if pool.bracket then
-                playerShareTotals[pool.category] = (playerShareTotals[pool.category] or 0) + (playerLevelShares[pool.bracket] or 0)
-            end
+    for _, pool in ipairs(itemPools) do
+        if pool.bracket == NoLevelBracket then
+            noLevelShares[pool.category] = pool.itemShare
+        elseif pool.bracket and strength > 0 then
+            playerShareTotals[pool.category] = (playerShareTotals[pool.category] or 0) + (playerLevelShares[pool.bracket] or 0)
         end
     end
 
@@ -621,8 +625,9 @@ local function GetBracketPoolWeights()
         if pool.bracket then
             local share = pool.itemShare
             local playerTotal = playerShareTotals[pool.category]
-            if strength > 0 and playerTotal and playerTotal > 0 then
-                share = (1 - strength) * share + strength * (playerLevelShares[pool.bracket] or 0) / playerTotal
+            if pool.bracket ~= NoLevelBracket and strength > 0 and playerTotal and playerTotal > 0 then
+                local leveledShare = 1 - (noLevelShares[pool.category] or 0)
+                share = (1 - strength) * share + strength * leveledShare * (playerLevelShares[pool.bracket] or 0) / playerTotal
             end
             weights[i] = pool.weight * share
         end
