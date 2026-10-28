@@ -119,7 +119,7 @@
 <ul>
 	<li><strong>Gear</strong> by quality: Green 25, Blue 15, Epic 5, others 1, Heirloom 0</li>
 	<li><strong>Mats</strong> (trade goods) by quality: White 30 (most herbs, ore, cloth and leather), Green 15, Blue 6, others 1, Heirloom 0</li>
-	<li><strong>Consumable</strong> 15, <strong>Glyph</strong> 10, <strong>Gem</strong> 8, <strong>Recipe</strong> 5, <strong>Projectile</strong> 5, <strong>Container</strong> 4, <strong>Companion</strong> 3, <strong>Other</strong> 3</li>
+	<li><strong>Consumable</strong> 15, <strong>Glyph</strong> 10, <strong>Gem</strong> 8, <strong>Recipe</strong> 5, <strong>Projectile</strong> 5, <strong>Container</strong> 4, <strong>Companion</strong> 3, <strong>Mount</strong> 2, <strong>Other</strong> 3</li>
 	<li><strong>SpecificItems</strong>: give single items their own weight, like <code>[41599] = 2</code></li>
 </ul>
 

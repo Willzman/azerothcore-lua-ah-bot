@@ -177,6 +177,7 @@ local ItemWeights = {
     Recipe = 5,
     Container = 4,                           -- Bags and quivers
     Companion = 3,                           -- Non-combat pets
+    Mount = 2,                               -- About 1 in 80 listings
     Projectile = 5,
     Other = 3,                               -- Everything else (keys, quest items, misc junk)
     SpecificItems = {
@@ -598,6 +599,8 @@ local function BuildItemPools()
             addToPool("Container", ItemWeights.Container, item, ItemWeights.Container)
         elseif item.class == 15 and item.subclass == 2 then
             addToPool("Companion", ItemWeights.Companion, item, ItemWeights.Companion)
+        elseif item.class == 15 and item.subclass == 5 then
+            addToPool("Mount", ItemWeights.Mount, item, ItemWeights.Mount)
         elseif item.class == 6 then
             addToPool("Projectile", ItemWeights.Projectile, item, ItemWeights.Projectile)
         elseif item.class == 16 then
