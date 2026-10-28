@@ -36,13 +36,18 @@ local ClearBotMailbox       = false          -- Default: False. If enabled, peri
 local EnableBuyer           = true           -- Default: True.
 local AHBuyTimer            = 0.5            -- Default: 0.5 (hours). How often the AH bot will try to purchase a few items.
 local ItemLevelLimit        = 187            -- Default: 187. Prevents bots from buying items above this item level, to ensure players get access to those items instead.
-local BotsBuyFromBots       = false          -- Default: False. Prevent bots from buying other bots' items.
-local CostFormula           = 1              -- Default: 1. 1 = Quality based scaling, 2 = Entry ID influenced, 3 = Quality/Level focused, 4 = Balanced multi-factor, 5 = Progressive thresholds, 6 = Random (1000-1000000)
-local BotsPriceTolerance    = 1.5            -- Default: 1.5. Factor with which unadjusted CostFormula is multiplied to return how much a bot is willing to pay for an item. 
+local BotsBuyFromBots       = true           -- Default: True. Lets bots buy and bid on other bots' auctions (scaled down by BotToBotBuyFactor), so some bot auctions sell before they expire.
+local BotToBotBuyFactor     = 0.2            -- Default: 0.2. Multiplies the buyout/bid chances on other bots' auctions.
+local BuyerCostFormula      = 1              -- Default: 1. 1 = Quality based scaling, 2 = Entry ID influenced, 3 = Quality/Level focused, 4 = Balanced multi-factor, 5 = Progressive thresholds, 6 = Random (1000-1000000)
+local BotsPriceTolerance    = 1.5            -- Default: 1.5. Factor with which unadjusted BuyerCostFormula is multiplied to return how much a bot is willing to pay for an item. 
 local PlaceBidChance        = 20             -- Default: 10 (%). Setting to 0 disables bids. 
 local PlaceBuyoutChance     = 10             -- Default: 5 (%). Settings to 0 disables buyouts.
 local BuyOnStartup          = true           -- Default: True. Buyer bot will start buying auctions immediately on server start, instead of on AHBuyTimer. If false, will still activate on AHBuyTimer. 
 local DisableBidFight       = true           -- Default: True. Don't place bids/buyouts on items that players have already placed bids on
+local BotsOutbidBots        = true           -- Default: True. Bots may outbid other bots' bids, so bid prices move. Players' bids are only outbid if DisableBidFight is false.
+local DealChanceMultiplier  = 3              -- Default: 3. The better the deal, the likelier a bot buys: buyout/bid chances are multiplied by (value / price), up to this factor. 1 disables.
+local BuyDelayMin           = 30             -- Default: 30 (minutes). Bots only consider an auction once it has been listed for a random delay between BuyDelayMin and BuyDelayMax,
+local BuyDelayMax           = 360            -- Default: 360 (minutes). so items don't sell the moment they're posted.
 
 -------------------------------------------------------------------------------------------------------------------------
 -- Seller Configs
@@ -52,12 +57,30 @@ local EnableSeller          = true          -- Default: True.
 local MaxAuctions           = 10000         -- Default: 5000. Max number of auctions posted by the AH bot.
 local MinAuctions           = 2000          -- Default: 2000. Min number of auctions. If under this value, AH will repopulate sales. If over, but less than max, has 30% chance per check to populate AH.
 local RepopulationChance    = 30            -- Default: 30. Percentage chance to partially restock AH if stock is between max and min during a periodical check. Can be overriden to force populate whenever with ".ahbot auctions add". 
-local CostFormula           = 1             -- Default: 1. 1 = Quality based scaling, 2 = Entry ID influenced, 3 = Quality/Level focused, 4 = Balanced multi-factor, 5 = Progressive thresholds, 6 = Random (1000-1000000)
+local SellerCostFormula     = 1             -- Default: 1. 1 = Quality based scaling, 2 = Entry ID influenced, 3 = Quality/Level focused, 4 = Balanced multi-factor, 5 = Progressive thresholds, 6 = Random (1000-1000000)
 local SellPriceVariance     = 20            -- Default: 20. How many % to randomize prices with. 
 local AHSellTimer           = 5             -- Default: 5 (hours). How often the AH bot will check whether it needs to put up new auctions, in hours. Minimum 1.
 local SellOnStartup         = true          -- Default: True. Used for debugging and instantly populating an empty auction house. If true, fires AH bot on Eluna load (startup / Eluna reloads). If false, activates on AHSellTimer. 
 local ApplyRandomProperties = true          -- Default: True. Adds enchant/random stats and corresponding name to items (e.g., "of the Eagle"). This is DBC-based with Lua tables copied into this script. Disable if non-WotLK core.
 local SetAsCraftedBy        = true          -- Default: True. Marks items created by player spells as created by the AH bot posting the item.
+
+-- Seller Realism
+local AuctionDurations      = {[12] = 20, [24] = 40, [48] = 40}   -- Default: 12h = 20, 24h = 40, 48h = 40. Relative chance of each auction duration (in hours), like players choose when posting.
+local UndercutChance        = 80            -- Default: 80 (%). Chance to undercut the lowest listing of the same item in the same auction house, like players do.
+local UndercutRange         = {1, 5}        -- Default: 1, 5 (%). How much below the lowest listing to post when undercutting.
+local UndercutLimits        = {0.6, 1.5}    -- Default: 0.6, 1.5. Undercut prices are kept between 60% and 150% of the bot's own price, so it doesn't follow dumped or absurd listings.
+local HumanizePrices        = true          -- Default: True. Rounds prices like players type them, e.g. 4g 95s or 24g 99s 99c instead of 4g 37s 12c.
+local MarketPrices          = true          -- Default: True. Remembers a price factor per item and auction house: raised when the bot's listings sell, lowered when they expire unsold.
+local MarketPriceLimits     = {0.5, 2.0}    -- Default: 0.5, 2.0. Lowest and highest market price factor.
+local HousePriceModifiers   = {[2] = 1.0, [6] = 1.0, [7] = 1.15}  -- Default: 2 = 1.0, 6 = 1.0, 7 = 1.15. Price factor per auction house. The neutral AH takes a bigger cut, so prices there run higher.
+local StackSizeWeights      = {[1] = 15, [5] = 20, [10] = 25, [20] = 30, full = 10}  -- Default: 1 = 15, 5 = 20, 10 = 25, 20 = 30, full = 10. Relative chance of each stack size for StackedItemClasses. Sizes above an item's max stack are skipped.
+local CheapItemPrice        = 5000          -- Default: 5000 (50s). Items whose single unit costs less than this are mostly sold in full stacks.
+local CheapFullStackWeight  = 60            -- Default: 60. Replaces the 'full' stack weight for cheap items.
+local MultiListClasses      = {0, 7}        -- Default: 0, 7 (Consumables and Trade Goods). Item classes that may be posted as several listings at slightly increasing prices, like several sellers undercutting each other.
+local MultiListChance       = 40            -- Default: 40 (%). Chance for an item of MultiListClasses to get extra listings.
+local MaxExtraListings      = 3             -- Default: 3. Maximum number of extra listings per item.
+local MatchPlayerLevels     = 0.5           -- Default: 0.5. From 0 to 1, how strongly gear and consumable listings follow the levels of recently active players. 0 or false disables.
+local PlayerActivityDays    = 7             -- Default: 7. Characters who logged in within this many days count as active for MatchPlayerLevels.
 
 -------------------------------------------------------------------------------------------------------------------------
 -- Item Seller Filter Configs
@@ -77,7 +100,7 @@ local MinContainerSize       = 16                  -- Default: 16. Don't allow s
 local MinLevelConsumables    = 50                  -- Default: 50. Prevents the AH bot from flooding the market with low level junk.
 local MinLevelGear           = 10                  -- Default: 10. Prevents the AH bot from flooding the market with low level junk and unobtainable starter items.
 local MaxLevel               = 80                  -- Default: 80. The AH bot will not sell any item with a level limit exceeding this value.
-local StackedItemClasses     = {0, 5, 6, 7}        -- Default: 0, 5, 6, 7. Sells stacks between 50-100% of max stack size. Possible values: 0 (Consumable), 1 (Container), 2 (Weapon), 3 (Gem), 4 (Armor), 5 (Reagent), 6 (Projectile), 7 (Trade Goods), 9 (Recipe), 11 (Quiver), 12 (Quest), 13 (Key) 15 (Miscellaneous), 16 (Glyph).
+local StackedItemClasses     = {0, 5, 6, 7}        -- Default: 0, 5, 6, 7. Sells stacks using StackSizeWeights. Possible values: 0 (Consumable), 1 (Container), 2 (Weapon), 3 (Gem), 4 (Armor), 5 (Reagent), 6 (Projectile), 7 (Trade Goods), 9 (Recipe), 11 (Quiver), 12 (Quest), 13 (Key) 15 (Miscellaneous), 16 (Glyph).
 local AlwaysMaxStackAmmo     = true                -- Default: True. If true, always sells ammo in stacks of 1000.
 local AdjustedAmmoPrices     = true                -- Default: True. Ammo price variables are inconsistent. This adjusts ammunition prices to realistic in-game prices. For example, Iceblade Arrows are set to between 20g-35g per stack.
 local AllowCommonAmmo        = false               -- Defualt: False. Common ammo is just dead weight.
@@ -108,11 +131,9 @@ local AllowHolidayItems        = false                           -- Default: Fal
 local AllowConjured            = false                           -- Default: False. Toggles conjured items like mage strudels.
 
 -- Seller Item Weights
--- The weight is always relative to the total set and number of items in the category.
--- The way it works is that it feeds all the items of the class/ID X times into the weight tables,
--- increasing the bool we can pick items from with duplicates of higher weighted categories.
--- Increasing one value will supplant the value of the other values.
--- Each weight number must be an integer, otherwise its category will be skipped
+-- Each category is picked with a chance relative to its weight, then an item is picked at random within it.
+-- An item can be picked at most <weight> times per cycle (rounded down), so categories with a weight below 1 are skipped.
+-- Defaults favour what players buy most on a live server: trade goods, consumables, gems, glyphs and BoE greens.
 local ItemWeights = {
     Gear = {
         ["Gray/Poor"]            = 1,
@@ -124,19 +145,24 @@ local ItemWeights = {
         ["Red/Artifact"]         = 1,
         ["Gold/Heirloom"]        = 0
     },
-    Mats = {
+    Mats = {                                 -- Trade goods. Most herbs, ores, cloth and leather are White/Common.
         ["Gray/Poor"]            = 1,
-        ["White/Common"]         = 2,
-        ["Green/Uncommon"]       = 30,
-        ["Blue/Rare"]            = 10,
+        ["White/Common"]         = 30,
+        ["Green/Uncommon"]       = 15,
+        ["Blue/Rare"]            = 6,
         ["Purple/Epic"]          = 1,
         ["Orange/Legendary"]     = 1,
         ["Red/Artifact"]         = 1,
         ["Gold/Heirloom"]        = 0
     },
+    Consumable = 15,                         -- Potions, elixirs, flasks, food, scrolls, etc.
+    Gem = 8,
     Glyph = 10,
+    Recipe = 5,
+    Container = 4,                           -- Bags and quivers
+    Companion = 3,                           -- Non-combat pets
     Projectile = 5,
-    Other = 20,
+    Other = 3,                               -- Everything else (keys, quest items, misc junk)
     SpecificItems = {
         -- Example items to include that the auction house bots will weigh as separate categories.
         -- Adding weights per item ID here can, for example, ensure that they are always sold by the AH in a desired (relative) quantity.
@@ -203,6 +229,11 @@ end
 
 TagElunaAuctions()
 RegisterServerEvent(14, TagElunaAuctions)
+
+if MarketPrices then -- Bot listings and the market price factors learned from them
+    CharDBExecute("CREATE TABLE IF NOT EXISTS ahbot_market (houseid INT UNSIGNED NOT NULL, entry INT UNSIGNED NOT NULL, factor FLOAT NOT NULL DEFAULT 1, PRIMARY KEY (houseid, entry))")
+    CharDBExecute("CREATE TABLE IF NOT EXISTS ahbot_listings (id INT UNSIGNED NOT NULL, itemguid INT UNSIGNED NOT NULL, houseid INT UNSIGNED NOT NULL, entry INT UNSIGNED NOT NULL, expiretime INT UNSIGNED NOT NULL, hasbid TINYINT UNSIGNED NOT NULL DEFAULT 0, PRIMARY KEY (id, itemguid))")
+end
 
 local itemCache = {}                                          -- Stores all entries from the item_template for further processing
 local NextAHBotSellCycle = os.time() + AHSellTimer * 60 * 60  -- Used in print and cmd feedback
@@ -448,18 +479,33 @@ end
 
 -- Weighted item pools, built once from itemCache on first use. Each pool lists every item once and
 -- caps how many times an item may be picked per cycle, instead of storing an item once per weight point.
+-- Gear and consumables are split into level brackets so listings can follow active players' levels.
 local itemPools
+local playerLevelShares -- Share of recently active players per level bracket, refreshed every sell cycle
+
+local function GetLevelBracket(level)
+    return math.min(8, math.floor(level / 10)) -- 0-9, 10-19, ... 70-79, 80
+end
+
+local function IsInList(list, value)
+    if not list then return false end
+    for _, v in ipairs(list) do
+        if v == value then return true end
+    end
+    return false
+end
 
 local function BuildItemPools()
     local pools = {}
     local poolsByKey = {}
 
-    local function addToPool(key, weight, item, maxPicks)
-        maxPicks = math.floor(maxPicks)
+    local function addToPool(category, weight, item, maxPicks, bracket)
+        maxPicks = math.floor(maxPicks or 0)
         if not weight or weight <= 0 or maxPicks < 1 then return end
+        local key = bracket and (category .. "_" .. bracket) or category
         local pool = poolsByKey[key]
         if not pool then
-            pool = {weight = weight, items = {}, maxPicks = {}, totalPicks = 0, usesCount = false}
+            pool = {category = category, bracket = bracket, weight = weight, items = {}, maxPicks = {}, totalPicks = 0, usesCount = false}
             poolsByKey[key] = pool
             table.insert(pools, pool)
         end
@@ -469,15 +515,26 @@ local function BuildItemPools()
     end
 
     for _, item in pairs(itemCache) do
+        local bracket = GetLevelBracket(item.RequiredLevel)
         if ItemWeights.SpecificItems[item.entry] then
             local weight = ItemWeights.SpecificItems[item.entry]
             addToPool("SpecificItems", weight, item, weight)
         elseif item.class == 2 or item.class == 4 then
             local weight = ItemWeights.Gear[getQualityString(item.Quality)]
-            addToPool("Gear" .. item.Quality, weight, item, weight or 0)
+            addToPool("Gear" .. item.Quality, weight, item, weight, bracket)
         elseif item.class == 7 then
             local weight = ItemWeights.Mats[getQualityString(item.Quality)]
-            addToPool("Mats" .. item.Quality, weight, item, weight or 0)
+            addToPool("Mats" .. item.Quality, weight, item, weight)
+        elseif item.class == 0 then
+            addToPool("Consumable", ItemWeights.Consumable, item, ItemWeights.Consumable, bracket)
+        elseif item.class == 3 then
+            addToPool("Gem", ItemWeights.Gem, item, ItemWeights.Gem)
+        elseif item.class == 9 then
+            addToPool("Recipe", ItemWeights.Recipe, item, ItemWeights.Recipe)
+        elseif item.class == 1 or item.class == 11 then
+            addToPool("Container", ItemWeights.Container, item, ItemWeights.Container)
+        elseif item.class == 15 and item.subclass == 2 then
+            addToPool("Companion", ItemWeights.Companion, item, ItemWeights.Companion)
         elseif item.class == 6 then
             addToPool("Projectile", ItemWeights.Projectile, item, ItemWeights.Projectile)
         elseif item.class == 16 then
@@ -492,7 +549,47 @@ local function BuildItemPools()
         poolsByKey.SpecificItems.usesCount = true
     end
 
+    -- Item count per category, to split a category's weight between its level brackets
+    local categoryItems = {}
+    for _, pool in ipairs(pools) do
+        if pool.bracket then
+            categoryItems[pool.category] = (categoryItems[pool.category] or 0) + #pool.items
+        end
+    end
+    for _, pool in ipairs(pools) do
+        if pool.bracket then
+            pool.itemShare = #pool.items / categoryItems[pool.category]
+        end
+    end
+
     return pools
+end
+
+-- Weight of a level bracket pool: its category weight split by item count, shifted towards active players' levels
+local function GetBracketPoolWeights()
+    local weights = {}
+    local playerShareTotals = {}
+    local strength = (MatchPlayerLevels and playerLevelShares) and MatchPlayerLevels or 0
+
+    if strength > 0 then
+        for _, pool in ipairs(itemPools) do
+            if pool.bracket then
+                playerShareTotals[pool.category] = (playerShareTotals[pool.category] or 0) + (playerLevelShares[pool.bracket] or 0)
+            end
+        end
+    end
+
+    for i, pool in ipairs(itemPools) do
+        if pool.bracket then
+            local share = pool.itemShare
+            local playerTotal = playerShareTotals[pool.category]
+            if strength > 0 and playerTotal and playerTotal > 0 then
+                share = (1 - strength) * share + strength * (playerLevelShares[pool.bracket] or 0) / playerTotal
+            end
+            weights[i] = pool.weight * share
+        end
+    end
+    return weights
 end
 
 local function SelectRandomItems()
@@ -505,15 +602,16 @@ local function SelectRandomItems()
         available[i] = #pool.items
         picksLeft[i] = pool.totalPicks
     end
+    local bracketWeights = GetBracketPoolWeights()
     local timesPicked = {}
 
     local selectedItems = {}
-    for _ = 1, ActionsPerCycle do
+    while #selectedItems < ActionsPerCycle do
         local totalWeight = 0
         local cumWeights = {}
         for i, pool in ipairs(itemPools) do
             if available[i] > 0 then
-                totalWeight = totalWeight + (pool.usesCount and picksLeft[i] or pool.weight)
+                totalWeight = totalWeight + (bracketWeights[i] or (pool.usesCount and picksLeft[i]) or pool.weight)
             end
             cumWeights[i] = totalWeight
         end
@@ -528,6 +626,14 @@ local function SelectRandomItems()
                 local itemIndex = math.random(1, available[i])
                 local item = items[itemIndex]
                 table.insert(selectedItems, item)
+
+                -- Popular items get a few extra listings, posted at slightly increasing prices
+                if IsInList(MultiListClasses, item.class) and MaxExtraListings and MaxExtraListings > 0 and math.random(100) <= MultiListChance then
+                    for _ = 1, math.random(1, MaxExtraListings) do
+                        if #selectedItems >= ActionsPerCycle then break end
+                        table.insert(selectedItems, item)
+                    end
+                end
 
                 timesPicked[item] = (timesPicked[item] or 0) + 1
                 picksLeft[i] = picksLeft[i] - 1
@@ -597,8 +703,49 @@ end
 -- AH Bot Buyer Script
 ---------------------------------------------------------------------------------
 
+local auctionReadyTimes = {} -- [auction id:item guid] = time from which bots will consider buying the auction
+
+local function IsBot(guid)
+    for _, bot in ipairs(AHBots) do
+        if bot == guid then return true end
+    end
+    return false
+end
+
+-- Picks a bot to buy or bid on an auction, never the seller or the current highest bidder
+local function PickBuyerBot(auction)
+    local candidates = {}
+    for _, bot in ipairs(AHBots) do
+        if bot ~= auction.itemowner and bot ~= auction.buyguid then
+            table.insert(candidates, bot)
+        end
+    end
+    if #candidates == 0 then return nil end
+    return candidates[math.random(1, #candidates)]
+end
+
+local function IsAuctionReadyToBuy(auction, now)
+    local key = auction.id .. ":" .. auction.itemguid
+    local readyAt = auctionReadyTimes[key]
+    if not readyAt then
+        readyAt = now + math.random(BuyDelayMin, math.max(BuyDelayMin, BuyDelayMax)) * 60
+        auctionReadyTimes[key] = readyAt
+    end
+    return now >= readyAt
+end
+
+-- On startup the seller hands over to the buyer, which must load the new auctions even if it buys nothing
+local function FinishBuyCycleWithoutTransactions()
+    if BuyOnStartup and SellOnStartup then
+        BuyOnStartup = false
+        SendMessageToGMs("No eligible items to buy. Loading in new auctions...")
+        RunCommand("reload auctions")
+    end
+    BuyOnStartup = false
+end
+
 local function AHBot_Buy_ProcessItemResults(itemResults, auctionResults)
-    if not itemResults then return end
+    if not itemResults then return FinishBuyCycleWithoutTransactions() end
     
     local itemEntries = {}
     local stackSizes = {}
@@ -635,21 +782,25 @@ local function AHBot_Buy_ProcessItemResults(itemResults, auctionResults)
 
         if validItem then
             if AHBotItemDebug then print("[Eluna AH Bot Item Debug]: Calculating price for valid item " .. item.entry) end
-            local cost = ChooseCostFormula(CostFormula, item) * BotsPriceTolerance
+            local cost = ChooseCostFormula(BuyerCostFormula, item) * BotsPriceTolerance
             if cost < 200000 then cost = math.random(50000, 250000) end
             if AHBotItemDebug then print("[Eluna AH Bot Item Debug]: Final adjusted cost for item " .. item.entry .. ": " .. cost) end
 
             for _, auction in ipairs(auctions) do
                 local count = stackSizes[auction.itemguid]
                 local stackCost = cost * count
-                if auction.buyoutprice < stackCost then
-                    if AHBotItemDebug then print("[Eluna AH Bot Item Debug]: Buyer - Found underpriced item " .. count .. "x " .. item.name .. " (" .. item.entry .. ") at " .. auction.buyoutprice .. " vs calculated " .. stackCost .. (count > 1 and " (" .. count .. "x " .. cost .. ")" or "")) end
+                -- Auctions without a buyout are judged by their current bid
+                local askingPrice = auction.buyoutprice > 0 and auction.buyoutprice or math.max(auction.startbid, auction.lastbid)
+                if askingPrice < stackCost then
+                    if AHBotItemDebug then print("[Eluna AH Bot Item Debug]: Buyer - Found underpriced item " .. count .. "x " .. item.name .. " (" .. item.entry .. ") at " .. askingPrice .. " vs calculated " .. stackCost .. (count > 1 and " (" .. count .. "x " .. cost .. ")" or "")) end
                     table.insert(underpricedItems, {
                         entry = item.entry,
-                        auctionId = auction.id
+                        auctionId = auction.id,
+                        value = stackCost,
+                        dealRatio = stackCost / math.max(1, askingPrice)
                     })
                 else
-                    if AHBotItemDebug then print("[Eluna AH Bot Item Debug]: Buyer - Not buying " .. count .. "x " .. item.name .. " (" .. item.entry .. ") at " .. auction.buyoutprice .. " vs calculated " .. stackCost .. (count > 1 and " (" .. count .. "x " .. cost .. ")" or "")) end
+                    if AHBotItemDebug then print("[Eluna AH Bot Item Debug]: Buyer - Not buying " .. count .. "x " .. item.name .. " (" .. item.entry .. ") at " .. askingPrice .. " vs calculated " .. stackCost .. (count > 1 and " (" .. count .. "x " .. cost .. ")" or "")) end
                 end
             end
         end
@@ -657,21 +808,17 @@ local function AHBot_Buy_ProcessItemResults(itemResults, auctionResults)
 
     if AHBotActionDebug then print("[Eluna AH Bot Debug]: Buyer - Found " .. #underpricedItems .. " underpriced items to roll buyout/bid on.") end
     
-    if #underpricedItems == 0 then
-        if BuyOnStartup and SellOnStartup then
-            BuyOnStartup = false
-            SendMessageToGMs("No eligible items to buy. Loading in new auctions...")
-            RunCommand("reload auctions")
-        end
-        return
-    end
+    if #underpricedItems == 0 then return FinishBuyCycleWithoutTransactions() end
 
-    BuyOnStartup = false
     AHBot_Buy_ProcessTransactions(underpricedItems, auctionResults)
 end
 
 function AHBot_Buy_ProcessTransactions(underpricedItems, auctionResults)
     local transactions = {}
+    local auctionsById = {}
+    for _, auction in ipairs(auctionResults) do
+        auctionsById[auction.id] = auction
+    end
     
     for _, item in ipairs(underpricedItems) do
         if AHBotItemDebug then print("[Eluna AH Bot Debug]: Processing transaction chances for item " .. item.entry) end
@@ -685,19 +832,20 @@ function AHBot_Buy_ProcessTransactions(underpricedItems, auctionResults)
             if AHBotItemDebug then print("[Eluna AH Bot Debug]: Adjusted bid roll for item " .. item.entry .. " to " .. bidRoll) end
         end
 
-        local matchingAuction
-        for _, auction in ipairs(auctionResults) do
-            if auction.id == item.auctionId then
-                matchingAuction = auction
-                break
-            end
-        end
+        local matchingAuction = auctionsById[item.auctionId]
+        local buyerBot = matchingAuction and PickBuyerBot(matchingAuction)
 
-        if matchingAuction then
+        if buyerBot then
+            -- Better deals are likelier to be bought, other bots' auctions less likely than players'
+            local chanceFactor = math.max(1, math.min(DealChanceMultiplier or 1, item.dealRatio))
+            if IsBot(matchingAuction.itemowner) then
+                chanceFactor = chanceFactor * BotToBotBuyFactor
+            end
+
             local transactionType = nil
-            if buyoutRoll <= PlaceBuyoutChance then
+            if matchingAuction.buyoutprice > 0 and buyoutRoll <= PlaceBuyoutChance * chanceFactor then
                 transactionType = "buyout"
-            elseif bidRoll <= PlaceBidChance then
+            elseif bidRoll <= PlaceBidChance * chanceFactor then
                 transactionType = "bid"
             end
 
@@ -706,33 +854,44 @@ function AHBot_Buy_ProcessTransactions(underpricedItems, auctionResults)
                 
                 if transactionType == "buyout" then
                     price = matchingAuction.buyoutprice
-                else  -- bid
-                    local minBid = math.max(matchingAuction.startbid * 1.10, matchingAuction.buyoutprice * 0.60)
-                    local maxBid = matchingAuction.buyoutprice * 0.95
+                else  -- bid, which must beat the current bid
+                    local minBid = math.max(matchingAuction.startbid * 1.10, matchingAuction.lastbid * 1.05 + 1)
+                    local maxBid
+                    if matchingAuction.buyoutprice > 0 then
+                        minBid = math.max(minBid, matchingAuction.buyoutprice * 0.60)
+                        maxBid = matchingAuction.buyoutprice * 0.95
+                    else
+                        maxBid = item.value
+                    end
 
-                    if minBid >= maxBid then  -- If no valid bid range exists, default to buyout
+                    if minBid < maxBid then
+                        price = math.floor(randomFloatBetween(minBid, maxBid))
+                    elseif matchingAuction.buyoutprice > 0 then -- If no valid bid range exists, default to buyout
                         transactionType = "buyout"
                         price = matchingAuction.buyoutprice
-                    else
-                        price = randomFloatBetween(minBid, maxBid)
                     end
                 end
                 
-                table.insert(transactions, {
-                    transactionType = transactionType,
-                    entry = item.entry,
-                    itemGuid = matchingAuction.itemguid,
-                    auctionId = matchingAuction.id,
-                    itemOwner = matchingAuction.itemowner,
-                    price = price,
-                    houseid = matchingAuction.houseid
-                })
+                if price then
+                    table.insert(transactions, {
+                        transactionType = transactionType,
+                        entry = item.entry,
+                        itemGuid = matchingAuction.itemguid,
+                        auctionId = matchingAuction.id,
+                        itemOwner = matchingAuction.itemowner,
+                        buyer = buyerBot,
+                        price = price,
+                        houseid = matchingAuction.houseid
+                    })
+                end
             end
         end
     end
     
     if #transactions > 0 then
         AHBot_Buy_ExecuteTransactions(transactions)
+    else
+        FinishBuyCycleWithoutTransactions()
     end
 end
 
@@ -743,8 +902,7 @@ function AHBot_Buy_ExecuteTransactions(transactions)
     local timeCases = {}
 
     for _, transaction in ipairs(transactions) do
-        local randomBot = AHBots[math.random(1, #AHBots)]
-        table.insert(buyguidCases, "WHEN " .. transaction.auctionId .. " THEN " .. randomBot)
+        table.insert(buyguidCases, "WHEN " .. transaction.auctionId .. " THEN " .. transaction.buyer)
         table.insert(lastbidCases, "WHEN " .. transaction.auctionId .. " THEN " .. transaction.price)
         table.insert(ids, transaction.auctionId)
 
@@ -761,6 +919,7 @@ function AHBot_Buy_ExecuteTransactions(transactions)
                   "time = CASE id " .. table.concat(timeCases, " ") .. " END " ..
                   "WHERE id IN(" .. table.concat(ids, ",") .. ")"
 
+    BuyOnStartup = false
     CharDBQueryAsync(query, function()
         SendMessageToGMs("Refreshing auctions cache to pick up new bot transactions...")
         RunCommand("reload auctions")
@@ -769,20 +928,13 @@ function AHBot_Buy_ExecuteTransactions(transactions)
 end
 
 local function AHBot_Buy_ProcessAuctionResults(results)
-    if not results then 
-        if BuyOnStartup and SellOnStartup then 
-            BuyOnStartup = false 
-            SendMessageToGMs("No eligible items to buy. Loading in new auctions...") 
-            RunCommand("reload auctions") 
-        end 
-        return 
-    end
+    if not results then return FinishBuyCycleWithoutTransactions() end
     
-    local tempResults = {}
+    local now = os.time()
+    local auctionResults = {}
     
-    -- Store all results in temporary table
     repeat
-        table.insert(tempResults, {
+        local auction = {
             id = results:GetUInt32(0),
             itemguid = results:GetUInt32(1),
             houseid = results:GetUInt32(2),
@@ -792,24 +944,27 @@ local function AHBot_Buy_ProcessAuctionResults(results)
             lastbid = results:GetUInt32(6),
             startbid = results:GetUInt32(7),
             bidtime = results:GetUInt32(8)
-        })
-    until not results:NextRow() or #tempResults >= ActionsPerCycle
-    
-    -- Filter out auctions with existing bidders if DisableBidFight is enabled
-    local auctionResults = {}
-    if DisableBidFight then
-        for _, result in ipairs(tempResults) do
-            if result.buyguid == 0 then
-                table.insert(auctionResults, result)
-            end
+        }
+
+        -- Skip auctions that were only just listed, and auctions with bids bots shouldn't fight over
+        local bidAllowed = auction.buyguid == 0
+            or not DisableBidFight
+            or (BotsOutbidBots and IsBot(auction.buyguid))
+        if bidAllowed and IsAuctionReadyToBuy(auction, now) then
+            table.insert(auctionResults, auction)
         end
-    else
-        auctionResults = tempResults
+    until not results:NextRow()
+
+    -- Forget auctions that are long gone (auctions last at most 48 hours)
+    for key, readyAt in pairs(auctionReadyTimes) do
+        if readyAt < now - 3 * 24 * 3600 then
+            auctionReadyTimes[key] = nil
+        end
     end
     
     if AHBotActionDebug then print("[Eluna AH Bot Debug]: Buyer - Found " .. #auctionResults .. " potential auctions to process") end
 
-    if #auctionResults == 0 then return end
+    if #auctionResults == 0 then return FinishBuyCycleWithoutTransactions() end
 
     -- Get item entries for all auction item GUIDs
     local itemGuids = {}
@@ -824,12 +979,13 @@ local function AHBot_Buy_ProcessAuctionResults(results)
 end
 
 local function AHBot_BuyAuction()
+    -- Random sample, so bots look at different auctions every cycle
     local query
     if BotsBuyFromBots then
-        query = string.format("SELECT id, itemguid, houseid, itemowner, buyoutprice, buyguid, lastbid, startbid, time FROM auctionhouse WHERE houseid IN (%s) LIMIT %d", houseList, ActionsPerCycle)
+        query = string.format("SELECT id, itemguid, houseid, itemowner, buyoutprice, buyguid, lastbid, startbid, time FROM auctionhouse WHERE houseid IN (%s) ORDER BY RAND() LIMIT %d", houseList, ActionsPerCycle)
         if AHBotActionDebug then print("[Eluna AH Bot Debug]: Buyer - Starting buy cycle including bot sellers") end
     else
-        query = string.format("SELECT id, itemguid, houseid, itemowner, buyoutprice, buyguid, lastbid, startbid, time FROM auctionhouse WHERE itemowner NOT IN (%s) AND houseid IN (%s) LIMIT %d", botList, houseList, ActionsPerCycle)
+        query = string.format("SELECT id, itemguid, houseid, itemowner, buyoutprice, buyguid, lastbid, startbid, time FROM auctionhouse WHERE itemowner NOT IN (%s) AND houseid IN (%s) ORDER BY RAND() LIMIT %d", botList, houseList, ActionsPerCycle)
         if AHBotActionDebug then print("[Eluna AH Bot Debug]: Buyer - Starting buy cycle excluding bot sellers") end
     end
     
@@ -843,8 +999,8 @@ end
 local currentHouse = 0
 local lastAuctionId
 
-local function CalculateItemCost(item, randomBot)
-    local cost = ChooseCostFormula(CostFormula, item)
+local function CalculateItemCost(item)
+    local cost = ChooseCostFormula(SellerCostFormula, item)
     
     -- Item type price adjustments
     if RecipePriceAdjustment and item.class == 9 and not item.name:find("Design:") then 
@@ -893,41 +1049,86 @@ local function CalculateItemCost(item, randomBot)
         }
         local priceRange = ammoPrices[item.Quality]
         if priceRange then
-            cost = math.random(priceRange[1], priceRange[2])
+            -- Ranges are per full stack, cost is per unit
+            cost = math.random(priceRange[1], priceRange[2]) / math.max(1, item.stackable)
         end
-    end
-    
-    -- Set crafted by
-    if item.craftedBy == 1 then 
-        item.craftedBy = randomBot 
     end
     
     return cost
 end
 
-local function CalculateStackSize(item)
+local function PickWeighted(weights)
+    local total = 0
+    for _, weight in pairs(weights) do total = total + weight end
+    if total <= 0 then return nil end
+    local rand = math.random() * total
+    for value, weight in pairs(weights) do
+        rand = rand - weight
+        if rand <= 0 then return value end
+    end
+    return next(weights)
+end
+
+local function CalculateStackSize(item, unitCost)
     local stack = 1
     
     if item.class == 6 and AlwaysMaxStackAmmo then
         stack = item.stackable
-    elseif StackedItemClasses then
-        for _, itemClass in ipairs(StackedItemClasses) do
-            if item.class == itemClass then
-                if item.stackable > 10 then
-                    stack = math.ceil(math.random(8, item.stackable))
-                else
-                    stack = math.ceil(math.random(1, item.stackable))
-                end
+    elseif item.stackable > 1 and IsInList(StackedItemClasses, item.class) then
+        -- Players post a handful of common stack sizes, and cheap materials mostly in full stacks
+        local weights = {}
+        for size, weight in pairs(StackSizeWeights) do
+            if size == "full" then
+                weights[item.stackable] = (weights[item.stackable] or 0) + ((unitCost < CheapItemPrice) and CheapFullStackWeight or weight)
+            elseif size < item.stackable then
+                weights[size] = (weights[size] or 0) + weight
             end
         end
+        stack = PickWeighted(weights) or 1
     end
     
     return stack
 end
 
+-- Rounds a price the way players type it, e.g. 4g 95s or 24g 99s 99c instead of 4g 37s 12c
+local function HumanizePrice(price)
+    price = math.floor(price)
+    if not HumanizePrices or price < 1000 then return math.max(1, price) end
+
+    local unit
+    if price < 10000 then unit = 100            -- Under 1g: whole silver
+    elseif price < 100000 then unit = 500       -- Under 10g: 5 silver steps
+    elseif price < 1000000 then unit = 10000    -- Under 100g: whole gold
+    elseif price < 10000000 then unit = 50000   -- Under 1000g: 5 gold steps
+    else unit = 100000 end                      -- Above: 10 gold steps
+
+    local rounded = math.max(unit, math.floor(price / unit + 0.5) * unit)
+    local roll = math.random(100)
+    if roll <= 25 then
+        rounded = rounded - 1                   -- 24g 99s 99c
+    elseif roll <= 50 then
+        rounded = rounded - unit / 20           -- 24g 95s
+    end
+    return math.floor(rounded)
+end
+
+local function PickAuctionDuration()
+    return (PickWeighted(AuctionDurations) or 24) * 3600
+end
+
+-- Market price factors per auction house and item entry, persisted in ahbot_market
+local marketFactors = {}
+local lowestUnitPrices = {} -- Lowest unit buyout per item entry in the house being stocked, refreshed per house each cycle
+
+local function GetMarketFactor(houseId, entry)
+    return (marketFactors[houseId] and marketFactors[houseId][entry]) or 1
+end
+
 local function ProcessItemCreation(selectedItems, houseId, availableGuids, availableIds)
     local itemQueryParts = {}
     local auctionQueryParts = {}
+    local listingQueryParts = {}
+    local batchListings = {} -- Listings posted this batch per item entry, for extra listings of the same item
     local auctionCount = 0
     
     for _, item in ipairs(selectedItems) do
@@ -945,29 +1146,58 @@ local function ProcessItemCreation(selectedItems, houseId, availableGuids, avail
             table.remove(availableIds, 1)
             
             local randomBot = AHBots[math.random(1, #AHBots)]
-            local cost = CalculateItemCost(item, randomBot)
-            local stack = CalculateStackSize(item)
-            local expireTime = os.time() + math.random(6 * 3600, 48 * 3600)
-            
-            cost = cost * stack
-            
-            if SellPriceVariance then
-                cost = cost * randomFloatBetween(1 - (SellPriceVariance/100), 1 + (SellPriceVariance/100))
+            local creator = (item.craftedBy == 1) and randomBot or 0
+            local expireTime = os.time() + PickAuctionDuration()
+            local cost, stack, undercut
+
+            local previous = batchListings[item.entry]
+            if previous then
+                -- Extra listing of the same item: same stack size, slightly above the previous listing
+                stack = previous.stack
+                cost = previous.cost * randomFloatBetween(1.01, 1.04)
+            else
+                local unitCost = CalculateItemCost(item) * (HousePriceModifiers[houseId] or 1)
+                if MarketPrices then
+                    unitCost = unitCost * GetMarketFactor(houseId, item.entry)
+                end
+                stack = CalculateStackSize(item, unitCost)
+                cost = unitCost * stack
+
+                if SellPriceVariance then
+                    cost = cost * randomFloatBetween(1 - (SellPriceVariance/100), 1 + (SellPriceVariance/100))
+                end
+
+                -- Undercut the lowest listing of this item, within limits of the bot's own price
+                local lowestUnit = lowestUnitPrices[item.entry]
+                if lowestUnit and UndercutChance and math.random(100) <= UndercutChance then
+                    local lowestTotal = lowestUnit * stack
+                    local target = lowestTotal * (1 - randomFloatBetween(UndercutRange[1], UndercutRange[2]) / 100)
+                    cost = math.max(cost * UndercutLimits[1], math.min(cost * UndercutLimits[2], target))
+                    if cost < lowestTotal then
+                        cost = HumanizePrice(cost)
+                        if cost >= lowestTotal then cost = math.max(1, math.floor(lowestTotal) - 1) end
+                        undercut = true
+                    end
+                end
             end
-            
-            cost = math.floor(cost)
-            local startBid = math.floor(cost * (math.random(51, 90) / 100))
+
+            if not undercut then cost = HumanizePrice(cost) end
+            batchListings[item.entry] = {stack = stack, cost = cost}
+            local startBid = math.max(1, math.min(cost - 1, HumanizePrice(cost * (math.random(51, 90) / 100))))
             
             local randomStats, enchantString = EnchantmentModule.ApplyRandomEnchantments(item)
             
             -- Add item_instance entry
-            table.insert(itemQueryParts, "(" .. lastItemId .. ", " .. item.entry .. ", " .. randomBot .. ", " .. item.craftedBy .. ", 0, " .. stack .. ", 0, '" ..
+            table.insert(itemQueryParts, "(" .. lastItemId .. ", " .. item.entry .. ", " .. randomBot .. ", " .. creator .. ", 0, " .. stack .. ", 0, '" ..
                 item.c1 .. " " .. item.c2 .. " " .. item.c3 .. " " .. item.c4 .. " " .. item.c5 .. "', 0, '"..enchantString.."', " ..
                 randomStats .. ", " .. item.durability .. ", "..item.duration..", '')")
 
             -- Add auction entry
             table.insert(auctionQueryParts, string.format("(%d, %d, %d, %d, %d, %d, 0, 0, %d, 1, %d)",
                 lastAuctionId, houseId, lastItemId, randomBot, cost, expireTime, startBid, AddedByEluna))
+
+            -- Track the listing to learn from whether it sells
+            table.insert(listingQueryParts, string.format("(%d, %d, %d, %d, %d)", lastAuctionId, lastItemId, houseId, item.entry, expireTime))
         end
     end
     
@@ -977,6 +1207,9 @@ local function ProcessItemCreation(selectedItems, houseId, availableGuids, avail
         
         CharDBQueryAsync(itemQuery, function(results) -- Instantiate items in database
             CharDBQueryAsync(auctionQuery, function(results) -- Add auctions to database
+                if MarketPrices then
+                    CharDBExecute("REPLACE INTO ahbot_listings (id, itemguid, houseid, entry, expiretime) VALUES " .. table.concat(listingQueryParts, ","))
+                end
                 if AHBotActionDebug then 
                     print("[Eluna AH Bot Debug]: Seller - " .. auctionCount .. " auctions added to auction house no. " .. houseId .. ".") 
                 end
@@ -1131,7 +1364,33 @@ local function ProcessAuctionCheck(auctionCount, houseId)
         local selectedItems = SelectRandomItems()
         if AHBotActionDebug then print("[Eluna AH Bot Debug]: Seller - Item selection complete.") end
 
-        ProcessItemGuids(selectedItems, houseId)
+        lowestUnitPrices = {}
+        local entries = {}
+        local seen = {}
+        for _, item in ipairs(selectedItems) do
+            if not seen[item.entry] then
+                seen[item.entry] = true
+                table.insert(entries, item.entry)
+            end
+        end
+
+        if not (UndercutChance and UndercutChance > 0) or #entries == 0 then
+            return ProcessItemGuids(selectedItems, houseId)
+        end
+
+        -- Lowest unit buyout of each selected item in this house, to undercut
+        CharDBQueryAsync(string.format("SELECT ii.itemEntry, a.buyoutprice, ii.count FROM auctionhouse a JOIN item_instance ii ON ii.guid = a.itemguid WHERE a.houseid = %d AND a.buyoutprice > 0 AND ii.itemEntry IN (%s)", houseId, table.concat(entries, ",")), function(priceResult)
+            if priceResult then
+                repeat
+                    local entry = priceResult:GetUInt32(0)
+                    local unitPrice = priceResult:GetUInt32(1) / math.max(1, priceResult:GetUInt32(2))
+                    if not lowestUnitPrices[entry] or unitPrice < lowestUnitPrices[entry] then
+                        lowestUnitPrices[entry] = unitPrice
+                    end
+                until not priceResult:NextRow()
+            end
+            ProcessItemGuids(selectedItems, houseId)
+        end)
     else
         if AHBotActionDebug then 
             print("[Eluna AH Bot Debug]: Seller - Action house at capacity (Min auctions: "..MinAuctions..". Current auctions: ".. tostring(auctionCount) .." / " .. MaxAuctions .. "). No action taken, awaiting next cycle on ".. os.date("%H:%M", NextAHBotSellCycle) .. " server time.") 
@@ -1166,6 +1425,94 @@ function AddAuctions(specificHouse)
     end)
 end
 
+local marketFactorsLoaded = false
+
+-- Raises the price factor of items whose bot listings sold and lowers it for those that expired unsold
+local function UpdateMarketPrices(callback)
+    if not MarketPrices then return callback() end
+
+    if not marketFactorsLoaded then
+        return CharDBQueryAsync("SELECT houseid, entry, factor FROM ahbot_market", function(result)
+            if result then
+                repeat
+                    local houseId = result:GetUInt32(0)
+                    marketFactors[houseId] = marketFactors[houseId] or {}
+                    marketFactors[houseId][result:GetUInt32(1)] = result:GetFloat(2)
+                until not result:NextRow()
+            end
+            marketFactorsLoaded = true
+            UpdateMarketPrices(callback)
+        end)
+    end
+
+    -- Remember listings that got a bid, as won bids only disappear when the auction ends
+    CharDBQueryAsync("UPDATE ahbot_listings l JOIN auctionhouse a ON a.id = l.id AND a.itemguid = l.itemguid SET l.hasbid = 1 WHERE a.buyguid <> 0", function()
+        CharDBQueryAsync("SELECT l.id, l.itemguid, l.houseid, l.entry, l.expiretime, l.hasbid FROM ahbot_listings l LEFT JOIN auctionhouse a ON a.id = l.id AND a.itemguid = l.itemguid WHERE a.id IS NULL", function(result)
+            if not result then return callback() end
+
+            local now = os.time()
+            local finished = {}
+            local changed = {}
+            local sold, expired = 0, 0
+            repeat
+                local houseId = result:GetUInt32(2)
+                local entry = result:GetUInt32(3)
+                local wasSold = result:GetUInt32(5) == 1 or now < result:GetUInt32(4)
+
+                marketFactors[houseId] = marketFactors[houseId] or {}
+                local factor = marketFactors[houseId][entry] or 1
+                if wasSold then
+                    factor = factor * randomFloatBetween(1.03, 1.08)
+                    sold = sold + 1
+                else
+                    factor = factor * randomFloatBetween(0.92, 0.97)
+                    expired = expired + 1
+                end
+                marketFactors[houseId][entry] = math.max(MarketPriceLimits[1], math.min(MarketPriceLimits[2], factor))
+
+                changed[houseId .. ":" .. entry] = {houseId, entry}
+                table.insert(finished, "(" .. result:GetUInt32(0) .. ", " .. result:GetUInt32(1) .. ")")
+            until not result:NextRow()
+
+            local factorRows = {}
+            for _, key in pairs(changed) do
+                table.insert(factorRows, string.format("(%d, %d, %.4f)", key[1], key[2], marketFactors[key[1]][key[2]]))
+            end
+            CharDBExecute("REPLACE INTO ahbot_market (houseid, entry, factor) VALUES " .. table.concat(factorRows, ","))
+            CharDBExecute("DELETE FROM ahbot_listings WHERE (id, itemguid) IN (" .. table.concat(finished, ",") .. ")")
+
+            if AHBotActionDebug then print("[Eluna AH Bot Debug]: Seller - Market prices updated from " .. sold .. " sold and " .. expired .. " expired bot auctions.") end
+            callback()
+        end)
+    end)
+end
+
+-- Counts recently active players per level bracket, so listings can follow their levels
+local function RefreshPlayerLevels(callback)
+    if not MatchPlayerLevels or MatchPlayerLevels <= 0 then return callback() end
+
+    local since = os.time() - PlayerActivityDays * 24 * 3600
+    CharDBQueryAsync(string.format("SELECT level FROM characters WHERE (online = 1 OR logout_time > %d) AND guid NOT IN (%s)", since, botList), function(result)
+        local counts, total = {}, 0
+        if result then
+            repeat
+                local bracket = GetLevelBracket(result:GetUInt32(0))
+                counts[bracket] = (counts[bracket] or 0) + 1
+                total = total + 1
+            until not result:NextRow()
+        end
+
+        playerLevelShares = nil
+        if total > 0 then
+            playerLevelShares = {}
+            for bracket, count in pairs(counts) do
+                playerLevelShares[bracket] = count / total
+            end
+        end
+        callback()
+    end)
+end
+
 local function AHBot_SellItems(_, _, _, specificHouse)
     if not specificHouse then
         currentHouse = 0
@@ -1175,7 +1522,11 @@ local function AHBot_SellItems(_, _, _, specificHouse)
     else
         currentHouse = specificHouse
     end
-    AddAuctions(specificHouse)
+    UpdateMarketPrices(function()
+        RefreshPlayerLevels(function()
+            AddAuctions(specificHouse)
+        end)
+    end)
 end
 
 ---------------------------------------------------------------------------------
@@ -1299,10 +1650,8 @@ if EnableSeller then
 end
 
 if EnableBuyer then
-    for _, entry in ipairs(EnabledAuctionHouses) do
-        AHBotBuyEventId = CreateLuaEvent(AHBot_BuyAuction, AHBuyTimer * 65 * 60 * 1000, 0) -- 5 minutes after seller bots to not cause overlapping lag
-        if AHBotActionDebug then print("[Eluna AH Bot Debug]: Buyer - AH Bot buyer system initialized. Actions scheduled on every " .. AHBuyTimer .. " hour(s).") end
-    end
+    AHBotBuyEventId = CreateLuaEvent(AHBot_BuyAuction, AHBuyTimer * 65 * 60 * 1000, 0) -- 5 minutes after seller bots to not cause overlapping lag
+    if AHBotActionDebug then print("[Eluna AH Bot Debug]: Buyer - AH Bot buyer system initialized. Actions scheduled on every " .. AHBuyTimer .. " hour(s).") end
     if BuyOnStartup and not SellOnStartup then -- The seller will initiate buyers once done, if both are enabled, so here we must check is not SellOnStartup to not start overlapping buyers
         CreateLuaEvent(AHBot_BuyAuction, StartupDelay + 1000) -- Slight artificial delay in case StartupDelay is 0.
     end
@@ -1396,6 +1745,7 @@ local function AHBot_Cmd(event, player, command)
         return false
         
     elseif command:lower() == "ahbot auctions expire" or command == "ahbot auctions expire all" then
+        if MarketPrices then CharDBExecute("DELETE FROM ahbot_listings") end -- GM expiries say nothing about demand
         CharDBQueryAsync("UPDATE auctionhouse SET time = 1 WHERE itemowner IN (" .. botList .. ")", function(query)
             local player = GetPlayerByName(name)
             SendMessageToGMs("GM "..name.." has set all bot auctions to expire on next auction update. Refreshing auctions cache...")
@@ -1405,6 +1755,7 @@ local function AHBot_Cmd(event, player, command)
         end)
         return false
     elseif command:lower() == "ahbot auctions expire 2" then
+        if MarketPrices then CharDBExecute("DELETE FROM ahbot_listings WHERE houseid = 2") end -- GM expiries say nothing about demand
         CharDBQueryAsync("UPDATE auctionhouse SET time = 1 WHERE itemowner IN (" .. botList .. ") AND houseid = 2", function(query)
             local player = GetPlayerByName(name)
             SendMessageToGMs("GM "..name.." has set bot auctions on house ID 2 to expire on next auction update. Refreshing auctions cache...")
@@ -1414,6 +1765,7 @@ local function AHBot_Cmd(event, player, command)
         end)
         return false
     elseif command:lower() == "ahbot auctions expire 6" then
+        if MarketPrices then CharDBExecute("DELETE FROM ahbot_listings WHERE houseid = 6") end -- GM expiries say nothing about demand
         CharDBQueryAsync("UPDATE auctionhouse SET time = 1 WHERE itemowner IN (" .. botList .. ") AND houseid = 6", function(query)
             local player = GetPlayerByName(name)
             SendMessageToGMs("GM "..name.." has set bot auctions on house ID 6 to expire on next auction update. Refreshing auctions cache...")
@@ -1423,6 +1775,7 @@ local function AHBot_Cmd(event, player, command)
         end)
         return false
     elseif command:lower() == "ahbot auctions expire 7" then
+        if MarketPrices then CharDBExecute("DELETE FROM ahbot_listings WHERE houseid = 7") end -- GM expiries say nothing about demand
         CharDBQueryAsync("UPDATE auctionhouse SET time = 1 WHERE itemowner IN (" .. botList .. ") AND houseid = 7", function(query)
             local player = GetPlayerByName(name)
             SendMessageToGMs("GM "..name.." has set bot auctions on house ID 7 to expire on next auction update. Refreshing auctions cache...")

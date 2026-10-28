@@ -42,6 +42,18 @@
   <br><img src="https://raw.githubusercontent.com/mostlynick3/azerothcore-lua-ah-bot/master/images/sales.png" alt="AH Bot's Wide Variety of Sales">
 </ul>
 
+<h3>Live Server Realism</h3>
+<ul>
+	<li><strong>Real Auction Durations</strong> - Auctions run for 12, 24 or 48 hours, like players choose (<code>AuctionDurations</code>).</li>
+	<li><strong>Undercutting</strong> - Sellers post just below the cheapest listing of the same item, within limits of their own price (<code>UndercutChance</code>, <code>UndercutRange</code>, <code>UndercutLimits</code>).</li>
+	<li><strong>Human-Looking Prices</strong> - Prices are rounded the way players type them, like 4g 95s or 24g 99s 99c (<code>HumanizePrices</code>).</li>
+	<li><strong>Market Memory</strong> - Each auction house remembers a price factor per item: raised when bot listings sell, lowered when they expire unsold. Stored in the <code>ahbot_market</code> table (<code>MarketPrices</code>, <code>MarketPriceLimits</code>). The neutral auction house runs higher prices (<code>HousePriceModifiers</code>).</li>
+	<li><strong>Normal Stack Sizes</strong> - Stacks of 1, 5, 10, 20 or full stacks, with cheap materials mostly in full stacks. Popular materials and consumables get several listings at slightly increasing prices (<code>StackSizeWeights</code>, <code>MultiListClasses</code>).</li>
+	<li><strong>Demand-Based Weights</strong> - Trade goods, consumables, gems, glyphs and BoE greens make up most listings (<code>ItemWeights</code>).</li>
+	<li><strong>Follows Player Levels</strong> - Gear and consumable listings lean towards the levels of recently active players (<code>MatchPlayerLevels</code>, <code>PlayerActivityDays</code>).</li>
+	<li><strong>Human-Like Buyers</strong> - Better deals are likelier to be bought, auctions aren't bought the moment they're listed, bots occasionally buy from and outbid each other, and never buy or bid on their own auctions (<code>DealChanceMultiplier</code>, <code>BuyDelayMin</code>/<code>BuyDelayMax</code>, <code>BotsBuyFromBots</code>, <code>BotToBotBuyFactor</code>, <code>BotsOutbidBots</code>).</li>
+</ul>
+
 <h3>Item Filters</h3>
 <ul>
 	<li><strong>Sell All Auctionable Items</strong> - When enabled (default), the bot can sell every item a player could list on the auction house (anything not soulbound, account bound, conjured or timed). Only unobtainable placeholder/test items, <code>NeverSellIDs</code> and the expansion lock still apply. Disable it to use the curated filters below.</li>
