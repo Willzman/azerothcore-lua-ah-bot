@@ -54,8 +54,7 @@
 	<tr><td><code>ItemLevelLimit</code></td><td><code>187</code></td><td>Bots don't buy items at or above this item level, so players get them.</td></tr>
 	<tr><td><code>BotsBuyFromBots</code></td><td><code>false</code></td><td>Lets bots buy other bots' auctions.</td></tr>
 	<tr><td><code>BotToBotBuyFactor</code></td><td><code>0.2</code></td><td>Multiplies the chances when buying from another bot.</td></tr>
-	<tr><td><code>DisableBidFight</code></td><td><code>true</code></td><td>Bots don't bid on auctions players have bid on.</td></tr>
-	<tr><td><code>BotsOutbidBots</code></td><td><code>true</code></td><td>Bots may outbid other bots' bids. They never bid on their own auctions or outbid themselves.</td></tr>
+	<tr><td><code>BotsOutbidBots</code></td><td><code>true</code></td><td>Bots may outbid other bots' bids. They never bid on their own auctions, outbid themselves, or touch auctions players have bid on (players' bid gold isn't refunded when an auction is changed in the database).</td></tr>
 	<tr><td><code>BuyerCostFormula</code></td><td><code>1</code></td><td>Price formula used to value items (see Price Formulas).</td></tr>
 	<tr><td><code>BuyOnStartup</code></td><td><code>true</code></td><td>Run a buy cycle right after startup.</td></tr>
 </table>
@@ -132,10 +131,11 @@
 <p>For GMs. Type <code>.ahbot</code> in game to see them all.</p>
 <ul>
 	<li><code>.ahbot info</code> - Statistics about the bots.</li>
-	<li><code>.ahbot auctions add</code> / <code>.ahbot auctions buy</code> - Force a sell or buy cycle.</li>
+	<li><code>.ahbot auctions add [2/6/7]</code> / <code>.ahbot auctions buy</code> - Force a full batch of auctions on all or one auction house, or a buy cycle.</li>
 	<li><code>.ahbot auctions expire &lt;2/6/7/all&gt;</code> - Expire the bots' auctions.</li>
-	<li><code>.ahbot start</code> / <code>stop</code> / <code>pause &lt;hours&gt;</code> - Control the bots.</li>
-	<li><code>.ahbot set batchsize|sellcycle|buycycle &lt;value&gt;</code> - Change settings until the next reload.</li>
+	<li><code>.ahbot start sell|buy</code> / <code>.ahbot stop sell|buy</code> - Start or stop the seller or buyer.</li>
+	<li><code>.ahbot pause &lt;hours&gt;</code> - Pause the bots, which then resume on their normal schedule.</li>
+	<li><code>.ahbot set batchsize|sellcycle|buycycle &lt;value&gt;</code> - Change settings until the next reload. New cycle times take effect immediately.</li>
 	<li><code>.ahbot price &lt;item ID&gt;</code> - What the bots list an item for and pay for it, per auction house, with its market factor.</li>
 	<li><code>.ahbot ban &lt;item ID&gt;</code> / <code>.ahbot unban &lt;item ID&gt;</code> - Stop or resume the bots selling and buying an item. Banning removes the item's bot auctions, except those a player has bid on.</li>
 </ul>

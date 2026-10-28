@@ -1,4 +1,4 @@
-local ItemRandomSuffix = { -- 48 is a paladin test ID, and 94-98 are related to Darkmoon Faire, removed.
+local ItemRandomSuffix = { -- 46 and 48 are test IDs, and 94-98 are related to Darkmoon Faire, removed.
     [5] = {InternalName = "Monkey", Enchantment = {2802, 2803, 0, 0, 0}}, 			 [6] = {InternalName = "Eagle", Enchantment = {2804, 2803, 0, 0, 0}},
     [7] = {InternalName = "Bear", Enchantment = {2803, 2805, 0, 0, 0}},				 [8] = {InternalName = "Whale", Enchantment = {2806, 2803, 0, 0, 0}},
     [9] = {InternalName = "Owl", Enchantment = {2804, 2806, 0, 0, 0}}, 				 [10] = {InternalName = "Gorilla", Enchantment = {2804, 2805, 0, 0, 0}},
@@ -19,7 +19,7 @@ local ItemRandomSuffix = { -- 48 is a paladin test ID, and 94-98 are related to 
 	[39] = {InternalName = "Invoker", Enchantment = {2804, 2824, 2822, 0, 0}}, 	     [40] = {InternalName = "Bandit", Enchantment = {2802, 2803, 2825, 0, 0}},
 	[41] = {InternalName = "Beast", Enchantment = {2805, 2802, 2803, 0, 0}},     	 [42] = {InternalName = "Hierophant", Enchantment = {2803, 2806, 2824, 0, 0}},
     [43] = {InternalName = "Soldier", Enchantment = {2805, 2803, 2823, 0, 0}},       [44] = {InternalName = "Elder", Enchantment = {2803, 2804, 2816, 0, 0}},
-    [45] = {InternalName = "Champion", Enchantment = {2805, 2803, 2813, 0, 0}},      [46] = {InternalName = "Test", Enchantment = {2798, 2799, 2800, 2802, 2806}},
+    [45] = {InternalName = "Champion", Enchantment = {2805, 2803, 2813, 0, 0}},      --[[46 is a test suffix, skipping]]                                          
     [47] = {InternalName = "Blocking", Enchantment = {2826, 2805, 0, 0, 0}},    	 --[[48 is a test suffix, skipping]]
 	[49] = {InternalName = "Grove", Enchantment = {2805, 2802, 2803, 0, 0}},		 [50] = {InternalName = "Hunt", Enchantment = {2825, 2802, 2804, 0, 0}},    		 
     [51] = {InternalName = "Mind", Enchantment = {2824, 2822, 2804, 0, 0}},			 [52] = {InternalName = "Crusade", Enchantment = {2824, 2804, 2813, 0, 0}},

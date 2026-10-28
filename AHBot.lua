@@ -43,8 +43,7 @@ local BotsPriceTolerance    = 1.0            -- Default: 1.0. How much bots pay 
 local PlaceBidChance        = 5              -- Default: 5 (%). Setting to 0 disables bids. 
 local PlaceBuyoutChance     = 3              -- Default: 3 (%). Settings to 0 disables buyouts.
 local BuyOnStartup          = true           -- Default: True. Buyer bot will start buying auctions immediately on server start, instead of on AHBuyTimer. If false, will still activate on AHBuyTimer. 
-local DisableBidFight       = true           -- Default: True. Don't place bids/buyouts on items that players have already placed bids on
-local BotsOutbidBots        = true           -- Default: True. Bots may outbid other bots' bids, so bid prices move. Players' bids are only outbid if DisableBidFight is false.
+local BotsOutbidBots        = true           -- Default: True. Bots may outbid other bots' bids, so bid prices move. Bots never touch auctions players have bid on, as players' bid gold isn't refunded when an auction is changed in the database.
 local DealChanceMultiplier  = 3              -- Default: 3. The better the deal, the likelier a bot buys: buyout/bid chances are multiplied by (value / price), up to this factor. 1 disables.
 local BuyDelayMin           = 30             -- Default: 30 (minutes). Bots only consider an auction once it has been listed for a random delay between BuyDelayMin and BuyDelayMax,
 local BuyDelayMax           = 360            -- Default: 360 (minutes). so items don't sell the moment they're posted.
@@ -482,7 +481,7 @@ local function CheckAuctions(houseId, callback)
     function(countResult)
         local count
         if countResult then
-            count = tonumber(countResult:GetUInt64(0)) or 0
+            count = tonumber(tostring(countResult:GetUInt64(0))) or 0 -- 64-bit values can be userdata, which tonumber can't convert directly
             postedAuctions[houseId] = count
         else
             count = 0
@@ -834,6 +833,22 @@ end
 
 local auctionReadyTimes = {} -- [auction id:item guid] = time from which bots will consider buying the auction
 
+-- Whether players of the auction house's faction can use the item. Items for all races (-1, 0 or all bits) go everywhere.
+local function IsItemAllowedForHouse(item, houseId)
+    local race = item.race
+    if houseId == 7 or race <= 0 or race == 2147483647 then
+        return true
+    end
+    local races = (houseId == 2 and AllowedAllyRaces) or (houseId == 6 and AllowedHordeRaces) or {}
+    for _, allowedRace in ipairs(races) do
+        -- -1 and 2147483647 in the race lists mean "all races" items, handled above, and would match any item here
+        if allowedRace > 0 and allowedRace ~= 2147483647 and bitAnd(race, allowedRace) ~= 0 then
+            return true
+        end
+    end
+    return false
+end
+
 local function IsBot(guid)
     for _, bot in ipairs(AHBots) do
         if bot == guid then return true end
@@ -1086,9 +1101,8 @@ local function AHBot_Buy_ProcessAuctionResults(results)
             bidtime = results:GetUInt32(8)
         }
 
-        -- Skip auctions that were only just listed, and auctions with bids bots shouldn't fight over
+        -- Skip auctions that were only just listed, and auctions players have bid on
         local bidAllowed = auction.buyguid == 0
-            or not DisableBidFight
             or (BotsOutbidBots and IsBot(auction.buyguid))
         if bidAllowed and IsAuctionReadyToBuy(auction, now) then
             table.insert(auctionResults, auction)
@@ -1119,6 +1133,7 @@ local function AHBot_Buy_ProcessAuctionResults(results)
 end
 
 local function AHBot_BuyAuction()
+    if AHBotBuyEventId then NextAHBotBuyCycle = os.time() + AHBuyTimer * 65 * 60 end
     -- Random sample, so bots look at different auctions every cycle
     local query
     if BotsBuyFromBots then
@@ -1138,6 +1153,38 @@ end
 
 local currentHouse = 0
 local lastAuctionId
+local postedThisCycle = false -- Whether any house got new auctions this sell cycle, so they get loaded
+local forceThisCycle = false  -- Sell cycle started by .ahbot auctions add: post a full batch regardless of stock
+
+-- Called once per auction house, whether it got new auctions or not: moves on to the next house, or finishes the cycle
+local function FinishHouse(houseId)
+    currentHouse = currentHouse - houseId
+    if currentHouse > 0 then
+        if AHBotActionDebug then 
+            print("[Eluna AH Bot Debug]: Seller - Scheduling processing of next house ID.") 
+        end
+        return AddAuctions()
+    end
+
+    if AHBotSellEventId then NextAHBotSellCycle = os.time() + AHSellTimer * 60 * 60 end
+
+    if BuyOnStartup and EnableBuyer then -- The startup buy cycle loads the new auctions when it's done
+        if AHBotActionDebug then 
+            print("[Eluna AH Bot Debug]: Seller - Done processing all included auction houses, proceeding to initiate buyers...") 
+        end
+        AHBot_BuyAuction()
+        SendMessageToGMs("AH bot sellers initiated. Starting buyers...")
+        return
+    end
+
+    if postedThisCycle then
+        if AHBotActionDebug then 
+            print("[Eluna AH Bot Debug]: Seller - Done processing all included auction houses, instantiating auctions!") 
+        end
+        SendMessageToGMs("Refreshing auctions cache to pick up new bot auctions...")
+        RunCommand("reload auctions")
+    end
+end
 
 
 local function PickWeighted(weights)
@@ -1199,6 +1246,8 @@ local function PickAuctionDuration()
     return (PickWeighted(AuctionDurations) or 24) * 3600
 end
 
+local MaxAuctionPrice = 2147483647 -- Highest price the core accepts (MAX_MONEY_AMOUNT). One higher price would fail the whole batch insert.
+
 local lowestBotUnitPrices = {}    -- Lowest unit buyout per item entry from bots, in the house being stocked, refreshed per house each cycle
 local lowestPlayerUnitPrices = {} -- Same, from players
 
@@ -1207,6 +1256,13 @@ local function ProcessItemCreation(selectedItems, houseId, availableGuids, avail
     local auctionQueryParts = {}
     local listingQueryParts = {}
     local batchListings = {} -- Listings posted this batch per item entry, for extra listings of the same item
+    local enchantConfig = {
+        ApplyRandomProperties = ApplyRandomProperties,
+        AHBotItemDebug = AHBotItemDebug,
+        ItemRandomProperty = ItemRandomProperty,
+        ItemRandomProperties = ItemRandomProperties,
+        ItemRandomSuffix = ItemRandomSuffix,
+    }
     local auctionCount = 0
     
     for _, item in ipairs(selectedItems) do
@@ -1218,7 +1274,7 @@ local function ProcessItemCreation(selectedItems, houseId, availableGuids, avail
             if AHBotItemDebug then print("[Eluna AH Bot Item Debug]: Removing item " .. item.name .. " from queue due to belonging to another faction than auction house ID "..houseId) end
         else
             auctionCount = auctionCount + 1
-            lastItemId = availableGuids[1]
+            local lastItemId = availableGuids[1]
             table.remove(availableGuids, 1)
             lastAuctionId = availableIds[1]
             table.remove(availableIds, 1)
@@ -1274,10 +1330,11 @@ local function ProcessItemCreation(selectedItems, houseId, availableGuids, avail
             end
 
             if not undercut then cost = HumanizePrice(cost) end
+            cost = math.min(cost, MaxAuctionPrice)
             batchListings[item.entry] = {stack = stack, cost = cost}
             local startBid = math.max(1, math.min(cost - 1, HumanizePrice(cost * (math.random(51, 90) / 100))))
             
-            local randomStats, enchantString = EnchantmentModule.ApplyRandomEnchantments(item)
+            local randomStats, enchantString = EnchantmentModule.ApplyRandomEnchantments(item, enchantConfig)
             
             -- Add item_instance entry
             table.insert(itemQueryParts, "(" .. lastItemId .. ", " .. item.entry .. ", " .. randomBot .. ", " .. creator .. ", 0, " .. stack .. ", 0, '" ..
@@ -1306,33 +1363,12 @@ local function ProcessItemCreation(selectedItems, houseId, availableGuids, avail
                     print("[Eluna AH Bot Debug]: Seller - " .. auctionCount .. " auctions added to auction house no. " .. houseId .. ".") 
                 end
                 
-                currentHouse = currentHouse - houseId
-                
-                if currentHouse == 0 then
-                    if BuyOnStartup then
-                        if AHBotActionDebug then 
-                            print("[Eluna AH Bot Debug]: Seller - Done processing all included auction houses, proceeding to initiate buyers...") 
-                        end
-                        AHBot_BuyAuction()
-                        SendMessageToGMs("AH bot sellers initiated. Starting buyers...")
-                        return
-                    end
-                    
-                    if AHBotActionDebug then 
-                        print("[Eluna AH Bot Debug]: Seller - Done processing all included auction houses, instantiating auctions!") 
-                    end
-                    SendMessageToGMs("Refreshing auctions cache to pick up new bot auctions...")
-                    RunCommand("reload auctions")
-                    NextAHBotSellCycle = os.time() + AHSellTimer * 60 * 60
-                    return
-                end
-                
-                if AHBotActionDebug then 
-                    print("[Eluna AH Bot Debug]: Seller - Scheduling processing of next house ID.") 
-                end
-                AddAuctions() -- Check if more auctions are scheduled in other auction houses
+                postedThisCycle = true
+                FinishHouse(houseId)
             end)
         end)
+    else
+        FinishHouse(houseId) -- Nothing to post for this house, e.g. every selected item belongs to the other faction
     end
 end
 
@@ -1452,10 +1488,10 @@ local function ProcessItemGuids(selectedItems, houseId)
 end
 
 local function ProcessAuctionCheck(auctionCount, houseId)
-    if (auctionCount < MinAuctions) or (specificHouse or ((auctionCount < MaxAuctions) and (math.random(100) <= RepopulationChance))) then
-        -- Post less at quiet hours, unless the auction house is running low
+    if forceThisCycle or (auctionCount < MinAuctions) or ((auctionCount < MaxAuctions) and (math.random(100) <= RepopulationChance)) then
+        -- Post less at quiet hours, unless the auction house is running low or a GM forced a batch
         local batchSize = ActionsPerCycle
-        if HourlySellMultipliers and auctionCount >= MinAuctions then
+        if HourlySellMultipliers and auctionCount >= MinAuctions and not forceThisCycle then
             local multiplier = HourlySellMultipliers[tonumber(os.date("%H"))] or 1
             batchSize = math.max(1, math.floor(ActionsPerCycle * math.max(0, math.min(1, multiplier))))
         end
@@ -1493,11 +1529,9 @@ local function ProcessAuctionCheck(auctionCount, houseId)
         end)
     else
         if AHBotActionDebug then 
-            print("[Eluna AH Bot Debug]: Seller - Action house at capacity (Min auctions: "..MinAuctions..". Current auctions: ".. tostring(auctionCount) .." / " .. MaxAuctions .. "). No action taken, awaiting next cycle on ".. os.date("%H:%M", NextAHBotSellCycle) .. " server time.") 
+            print("[Eluna AH Bot Debug]: Seller - Auction house " .. houseId .. " has enough auctions (Min auctions: "..MinAuctions..". Current auctions: ".. tostring(auctionCount) .." / " .. MaxAuctions .. "). No auctions added this cycle.") 
         end
-        if BuyOnStartup then
-            AHBot_BuyAuction()
-        end
+        FinishHouse(houseId)
     end
 end
 
@@ -1653,6 +1687,8 @@ local function RefreshPlayerLevels(callback)
 end
 
 local function AHBot_SellItems(_, _, _, specificHouse)
+    postedThisCycle = false
+    forceThisCycle = specificHouse ~= nil -- Scheduled cycles don't pass a house, .ahbot auctions add does
     if not specificHouse then
         currentHouse = 0
         for _, houseId in ipairs(EnabledAuctionHouses) do
@@ -1802,14 +1838,42 @@ CreateLuaEvent(function()
     end)
 end, StartupDelay + 100) -- The core may crash if we get MySQL locked from other scripts querying database on load/reload Eluna. Adding slight delay in case StartupDelay is 0.
 
-if EnableSeller then
+-- Schedule the repeating sell/buy events. No-ops if already running. Returns whether an event was started.
+local function StartSellEvent()
+    if AHBotSellEventId then return false end
     AHBotSellEventId = CreateLuaEvent(AHBot_SellItems, AHSellTimer * 60 * 60 * 1000, 0)
     NextAHBotSellCycle = os.time() + AHSellTimer * 60 * 60
+    return true
+end
+
+local function StartBuyEvent()
+    if AHBotBuyEventId then return false end
+    AHBotBuyEventId = CreateLuaEvent(AHBot_BuyAuction, AHBuyTimer * 65 * 60 * 1000, 0) -- 5 minutes per hour after seller bots to not cause overlapping lag
+    NextAHBotBuyCycle = os.time() + AHBuyTimer * 65 * 60
+    return true
+end
+
+local function StopSellEvent()
+    if AHBotSellEventId then RemoveEventById(AHBotSellEventId) end
+    AHBotSellEventId = nil
+    NextAHBotSellCycle = nil
+end
+
+local function StopBuyEvent()
+    if AHBotBuyEventId then RemoveEventById(AHBotBuyEventId) end
+    AHBotBuyEventId = nil
+    NextAHBotBuyCycle = nil
+end
+
+local pauseEventId -- Resumes the bots after .ahbot pause
+
+if EnableSeller then
+    StartSellEvent()
     if AHBotActionDebug then print("[Eluna AH Bot Debug]: Seller - AH Bot seller system initialized. Actions scheduled on every " .. AHSellTimer .. " hour(s).") end
 end
 
 if EnableBuyer then
-    AHBotBuyEventId = CreateLuaEvent(AHBot_BuyAuction, AHBuyTimer * 65 * 60 * 1000, 0) -- 5 minutes after seller bots to not cause overlapping lag
+    StartBuyEvent()
     if AHBotActionDebug then print("[Eluna AH Bot Debug]: Buyer - AH Bot buyer system initialized. Actions scheduled on every " .. AHBuyTimer .. " hour(s).") end
     if BuyOnStartup and not SellOnStartup then -- The seller will initiate buyers once done, if both are enabled, so here we must check is not SellOnStartup to not start overlapping buyers
         CreateLuaEvent(AHBot_BuyAuction, StartupDelay + 1000) -- Slight artificial delay in case StartupDelay is 0.
@@ -1851,11 +1915,11 @@ end
 
 local function AHBot_Cmd(event, player, command)
     if not player then return end
-    if command:find("ah") then
-        if player:GetGMRank() < 1 then
-            player:SendBroadcastMessage("You don't have access to this command.")
-            return false
-        end
+    local lowerCommand = command:lower()
+    if not (lowerCommand:find("^ahbot") or lowerCommand:find("^auctions? add all$")) then return end -- Not ours, let the core handle it
+    if player:GetGMRank() < 1 then
+        player:SendBroadcastMessage("You don't have access to this command.")
+        return false
     end
     
     if blockCommands > os.time() then
@@ -1897,8 +1961,8 @@ local function AHBot_Cmd(event, player, command)
         player:SendBroadcastMessage("|- Min bot auctions: "..MinAuctions..". Max bot auctions: "..MaxAuctions..".")
         player:SendBroadcastMessage("|- Number of possible items in auction house pool: ".. ItemTemplateSize)
         player:SendBroadcastMessage("|- Bot items on auction houses on last cycle: "..(table.concat(auctionInfo, ", ")))
-        player:SendBroadcastMessage("|- Next auction house bot sell cycle (hours:minutes): ".. os.date("%H:%M", NextAHBotSellCycle))
-        player:SendBroadcastMessage("|- Next auction house bot buy cycle: in " .. math.ceil((NextAHBotBuyCycle - os.time()) / 60) .. " minutes")
+        player:SendBroadcastMessage("|- Next auction house bot sell cycle (hours:minutes): ".. (NextAHBotSellCycle and os.date("%H:%M", NextAHBotSellCycle) or "stopped"))
+        player:SendBroadcastMessage("|- Next auction house bot buy cycle: " .. (NextAHBotBuyCycle and ("in " .. math.max(0, math.ceil((NextAHBotBuyCycle - os.time()) / 60)) .. " minutes") or "stopped"))
         local status
         if AHBotSellEventId then status = "Online" else status = "Offline" end
         player:SendBroadcastMessage("|- Status auction house bot seller service: "..status)
@@ -1994,16 +2058,12 @@ local function AHBot_Cmd(event, player, command)
         player:SendBroadcastMessage("|cFFD8D8E6[Eluna AH Bot GM]|r: Syntax error. Please use either '.ahbot stop sell' or '.ahbot stop buy'.")
         return false
     elseif command:lower() == "ahbot stop sell" then
-        RemoveEventById(AHBotSellEventId)
-        AHBotSellEventId = nil
-        NextAHBotSellCycle = nil
+        StopSellEvent()
         SendMessageToGMs("GM "..name.." has force stopped the auction house seller on all auction houses.")
         print("[Eluna AH Bot]: GM "..player:GetGUIDLow().." just stopped the auction bot seller.")
         return false
     elseif command:lower() == "ahbot stop buy" then
-        RemoveEventById(AHBotBuyEventId)
-        AHBotBuyEventId = nil
-        NextAHBotBuyCycle = nil
+        StopBuyEvent()
         SendMessageToGMs("GM "..name.." has force stopped the auction house buyer on all auction houses.")
         print("[Eluna AH Bot]: GM "..player:GetGUIDLow().." just stopped the auction bot buyer.")
         return false
@@ -2015,11 +2075,18 @@ local function AHBot_Cmd(event, player, command)
         local _, _, pauseTime = command:find("ahbot pause (%d+)")
         if pauseTime and tonumber(pauseTime) >= 1 and tonumber(pauseTime) <= 24 then
             pauseTime = tonumber(pauseTime)
-            RemoveEventById(AHBotSellEventId)
-            RemoveEventById(AHBotBuyEventId)
-            AHBotBuyEventId = CreateLuaEvent(AHBot_BuyAuction, AHBuyTimer * pauseTime * 65 * 60 * 1000, 0)
-            AHBotSellEventId = CreateLuaEvent(AHBot_SellItems, AHSellTimer * pauseTime * 60 * 60 * 1000, 0)
-            NextAHBotSellCycle = os.time() + pauseTime * 60 * 60
+            -- Stop what's running now, and start it again with its normal timers once the pause is over
+            local resumeSell = AHBotSellEventId ~= nil or (pauseEventId ~= nil and EnableSeller)
+            local resumeBuy = AHBotBuyEventId ~= nil or (pauseEventId ~= nil and EnableBuyer)
+            StopSellEvent()
+            StopBuyEvent()
+            if pauseEventId then RemoveEventById(pauseEventId) end
+            pauseEventId = CreateLuaEvent(function()
+                pauseEventId = nil
+                if resumeSell then StartSellEvent() end
+                if resumeBuy then StartBuyEvent() end
+                SendMessageToGMs("Auction house bots resumed after a " .. pauseTime .. " hour pause.")
+            end, pauseTime * 60 * 60 * 1000, 1)
             SendMessageToGMs("GM "..name.." has paused all auction house bots for "..pauseTime.." hours.")
             print("[Eluna AH Bot]: Player "..player:GetGUIDLow().." just paused the auction bot for " .. pauseTime .. " hours.")
         else
@@ -2044,6 +2111,10 @@ local function AHBot_Cmd(event, player, command)
         if hours and tonumber(hours) >= 1 and tonumber(hours) <= 48 then
             hours = tonumber(hours)
             AHSellTimer = hours
+            if AHBotSellEventId then -- Reschedule with the new interval
+                StopSellEvent()
+                StartSellEvent()
+            end
             SendMessageToGMs("GM "..name.." has set the auction house bot's sell cycle time has been set to "..hours.." hours. Next cycle is in "..hours.." hour(s) from now.")
             print("[Eluna AH Bot]: GM "..player:GetGUIDLow().." just changed the auction bot's sell cycle time to "..hours.." hour(s).")
         else
@@ -2054,7 +2125,11 @@ local function AHBot_Cmd(event, player, command)
         local hours = tonumber(command:match("ahbot%s+set%s+buycycle%s+([%d%.]+)"))
         if hours and hours >= 0.1 and hours <= 48 then
             AHBuyTimer = hours
-            SendMessageToGMs("GM "..name.." has set the auction house bot's buy cycle time has been set to %.1f minutes. Next cycle is in %.1f minutes from now.", 60 * hours, 60 * hours)
+            if AHBotBuyEventId then -- Reschedule with the new interval
+                StopBuyEvent()
+                StartBuyEvent()
+            end
+            SendMessageToGMs(string.format("GM %s has set the auction house bot's buy cycle time to %.1f minutes. Next cycle is in %.1f minutes from now.", name, 65 * hours, 65 * hours))
             print(string.format("[Eluna AH Bot]: GM %d just changed the auction bot's buy cycle time to %.1f minutes.", player:GetGUIDLow(), 60 * hours))
         else
             player:SendBroadcastMessage("|cFFD8D8E6[Eluna AH Bot GM]|r: Invalid buy cycle time! Please specify a number between 0.1 and 48.")
@@ -2065,9 +2140,7 @@ local function AHBot_Cmd(event, player, command)
         player:SendBroadcastMessage("|cFFD8D8E6[Eluna AH Bot GM]|r: Incorrect syntax. Use either '.ahbot start sell' or '.ahbot start buy'.")
         return false
     elseif command:lower() == "ahbot start buy" then
-        if not AHBotBuyEventId then
-            AHBotBuyEventId = CreateLuaEvent(AHBot_BuyAuction, AHBuyTimer * 65 * 60 * 1000, 0)
-            NextAHBotBuyCycle = os.time() + AHBuyTimer * 60 * 60
+        if StartBuyEvent() then
             SendMessageToGMs("GM "..name.." has just started the auction house buyer bot.")
             print("[Eluna AH Bot]: GM "..player:GetGUIDLow().." just started the auction bot buyer.")
         else
@@ -2075,9 +2148,7 @@ local function AHBot_Cmd(event, player, command)
         end
         return false
     elseif command:lower() == "ahbot start sell" then
-        if not AHBotSellEventId then
-            AHBotSellEventId = CreateLuaEvent(AHBot_SellItems, AHSellTimer * 60 * 60 * 1000, 0)
-            NextAHBotSellCycle = os.time() + AHSellTimer * 60 * 60
+        if StartSellEvent() then
             SendMessageToGMs("GM "..name.." has just started the auction house seller bot.")
             print("[Eluna AH Bot]: GM "..player:GetGUIDLow().." just started the auction bot seller.")
         else

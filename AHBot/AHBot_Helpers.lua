@@ -1,22 +1,3 @@
-function IsItemAllowedForHouse(item, houseId)
-    if houseId == 7 or item.race == 2147483647 or item.race == -1 then 
-        return true
-    elseif houseId == 2 then -- Alliance AH
-        for _, race in ipairs(AllowedAllyRaces) do
-            if (bitAnd(item.race, race) ~= 0) then 
-                return true
-            end
-        end
-    elseif houseId == 6 then -- Horde AH
-        for _, race in ipairs(AllowedHordeRaces) do
-            if (bitAnd(item.race, race) ~= 0) then
-                return true
-            end
-        end
-    end
-    return false
-end
-
 function bitAnd(a, b)
     local result = 0
     local shift = 0
