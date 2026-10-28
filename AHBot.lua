@@ -20,28 +20,28 @@ if GetStateMapId() ~= -1 then return end
 
 local EnableAHBot           = true           -- Default: True. If false, AH bot is disabled. 
 local AHBots                = {1, 2, 3}      -- Default: 1, 2, 3. Chooses which player GUID lows will be used as AH bots. Must match extant characters. Not faction specific.
-local EnabledAuctionHouses  = {2, 6}         -- Default: 2, 6, 7. Possible values: 2 is ally, 6 is horde, 7 is cross faction (neutral). Multiple values accepted, like {2, 6, 7}. Only 7 is required on cross-faction servers.
-local AHBotActionDebug      = true           -- Default: False. Enables various action debug prints. Critical prints will still be active even if false.
+local EnabledAuctionHouses  = {2, 6}         -- Default: 2, 6. Possible values: 2 is ally, 6 is horde, 7 is cross faction (neutral). Multiple values accepted, like {2, 6, 7}. Only 7 is required on cross-faction servers.
+local AHBotActionDebug      = true           -- Default: True. Enables various action debug prints. Critical prints will still be active even if false.
 local AHBotItemDebug        = false          -- Default: False. Enables debug prints on item handling, cost per item entry, Quality, etc.
 local ActionsPerCycle       = 500            -- Default: 500 (items). Batch size per auction house at peak hours (see HourlySellMultipliers). The higher the value, the faster the bots fill the AH up to the min auctions limit and the more items they buy, at the expense of performance.
 local StartupDelay          = 1000           -- Default: 1000 (ms). Delay after startup/Eluna reload before the auction house initializes. Having this set to 0 will cause lag on initial world load. 
 local EnableGMMessages      = true           -- Default: True. Messages all online GMs on command and initiation events.
 local AnnounceOnLogin       = true           -- Default: True. Announces to all players on login that this server runs the Eluna AH Bot module.
-local ClearBotMailbox       = true           -- Default: False. If enabled, periodically clears bots' mailbox, including the items in it. Ensures no overflow from bot mailbox filling up with expired/sold/bought auctions. Recommended when selling often.
+local ClearBotMailbox       = true           -- Default: True. If enabled, periodically clears bots' mailbox, including the items in it. Ensures no overflow from bot mailbox filling up with expired/sold/bought auctions. Recommended when selling often.
 
 -------------------------------------------------------------------------------------------------------------------------
 -- Buyer Configs
 -------------------------------------------------------------------------------------------------------------------------
 
 local EnableBuyer           = true           -- Default: True.
-local AHBuyTimer            = 1              -- Default: 0.5 (hours). How often the AH bot will try to purchase a few items.
+local AHBuyTimer            = 1              -- Default: 1 (hours). How often the AH bot will try to purchase a few items.
 local ItemLevelLimit        = 187            -- Default: 187. Prevents bots from buying items above this item level, to ensure players get access to those items instead.
-local BotsBuyFromBots       = false          -- Default: True. Lets bots buy and bid on other bots' auctions (scaled down by BotToBotBuyFactor), so some bot auctions sell before they expire.
+local BotsBuyFromBots       = false          -- Default: False. Lets bots buy and bid on other bots' auctions (scaled down by BotToBotBuyFactor), so some bot auctions sell before they expire.
 local BotToBotBuyFactor     = 0.2            -- Default: 0.2. Multiplies the buyout/bid chances on other bots' auctions.
 local BuyerCostFormula      = 1              -- Default: 1. 1 = Quality based scaling, 2 = Entry ID influenced, 3 = Quality/Level focused, 4 = Balanced multi-factor, 5 = Progressive thresholds, 6 = Random (1000-1000000)
 local BotsPriceTolerance    = 1.0            -- Default: 1.0. How much bots pay at most, relative to the price they would list the item at themselves (including market prices). 1.0 = only buy below the bots' own price.
-local PlaceBidChance        = 5              -- Default: 10 (%). Setting to 0 disables bids. 
-local PlaceBuyoutChance     = 3              -- Default: 5 (%). Settings to 0 disables buyouts.
+local PlaceBidChance        = 5              -- Default: 5 (%). Setting to 0 disables bids. 
+local PlaceBuyoutChance     = 3              -- Default: 3 (%). Settings to 0 disables buyouts.
 local BuyOnStartup          = true           -- Default: True. Buyer bot will start buying auctions immediately on server start, instead of on AHBuyTimer. If false, will still activate on AHBuyTimer. 
 local DisableBidFight       = true           -- Default: True. Don't place bids/buyouts on items that players have already placed bids on
 local BotsOutbidBots        = true           -- Default: True. Bots may outbid other bots' bids, so bid prices move. Players' bids are only outbid if DisableBidFight is false.
@@ -55,12 +55,12 @@ local MaxBuysPerCycle       = 3              -- Default: 3. Maximum buyouts/bids
 -------------------------------------------------------------------------------------------------------------------------
 
 local EnableSeller          = true          -- Default: True.
-local MaxAuctions           = 15000         -- Default: 5000. Max number of auctions posted by the AH bot.
-local MinAuctions           = 10000         -- Default: 2000. Min number of auctions. If under this value, AH will repopulate sales. If over, but less than max, has 30% chance per check to populate AH.
+local MaxAuctions           = 15000         -- Default: 15000. Max number of auctions posted by the AH bot.
+local MinAuctions           = 10000         -- Default: 10000. Min number of auctions. If under this value, AH will repopulate sales. If over, but less than max, has 30% chance per check to populate AH.
 local RepopulationChance    = 30            -- Default: 30. Percentage chance to partially restock AH if stock is between max and min during a periodical check. Can be overriden to force populate whenever with ".ahbot auctions add". 
 local SellerCostFormula     = 1             -- Default: 1. 1 = Quality based scaling, 2 = Entry ID influenced, 3 = Quality/Level focused, 4 = Balanced multi-factor, 5 = Progressive thresholds, 6 = Random (1000-1000000)
 local SellPriceVariance     = 20            -- Default: 20. How many % to randomize prices with. 
-local AHSellTimer           = 1             -- Default: 5 (hours). How often the AH bot will check whether it needs to put up new auctions, in hours. Minimum 1.
+local AHSellTimer           = 1             -- Default: 1 (hours). How often the AH bot will check whether it needs to put up new auctions, in hours. Minimum 1.
 local HourlySellMultipliers = {             -- Share of ActionsPerCycle posted per sell cycle by server hour (0-23), from 0 to 1. Busier evenings, quiet nights.
     [0] = 0.4, [1] = 0.3, [2] = 0.2, [3] = 0.2, [4] = 0.2, [5] = 0.2,       -- Only applies while an auction house has at least MinAuctions,
     [6] = 0.3, [7] = 0.4, [8] = 0.5, [9] = 0.5, [10] = 0.6, [11] = 0.6,     -- below that the full ActionsPerCycle is posted.
@@ -139,6 +139,7 @@ local AllowMisc                = false                           -- Default: Fal
 local AllowJunk                = true                            -- Default: True. Toggles junk, such as fishing boxes.
 local AllowHolidayItems        = false                           -- Default: False. Toggles holiday/seasonal items.
 local AllowConjured            = false                           -- Default: False. Toggles conjured items like mage strudels.
+local HolidayItemsInSeason     = true                            -- Default: True. Items tied to a holiday (Winter Veil, Hallow's End, etc.) are only posted while that holiday's game event is active.
 
 -- Seller Item Weights
 -- Each category is picked with a chance relative to its weight, then an item is picked at random within it.
@@ -240,12 +241,15 @@ end
 TagElunaAuctions()
 RegisterServerEvent(14, TagElunaAuctions)
 
+CharDBExecute("CREATE TABLE IF NOT EXISTS ahbot_banned (entry INT UNSIGNED NOT NULL, PRIMARY KEY (entry))") -- Items banned with .ahbot ban
+
 if MarketPrices then -- Bot listings and the market price factors learned from them
     CharDBExecute("CREATE TABLE IF NOT EXISTS ahbot_market (houseid INT UNSIGNED NOT NULL, entry INT UNSIGNED NOT NULL, factor FLOAT NOT NULL DEFAULT 1, PRIMARY KEY (houseid, entry))")
     CharDBExecute("CREATE TABLE IF NOT EXISTS ahbot_listings (id INT UNSIGNED NOT NULL, itemguid INT UNSIGNED NOT NULL, houseid INT UNSIGNED NOT NULL, entry INT UNSIGNED NOT NULL, expiretime INT UNSIGNED NOT NULL, hasbid TINYINT UNSIGNED NOT NULL DEFAULT 0, PRIMARY KEY (id, itemguid))")
 end
 
 local itemCache = {}                                          -- Stores all entries from the item_template for further processing
+local ItemTemplateSize = 0                                    -- Number of items in itemCache
 local NextAHBotSellCycle = os.time() + AHSellTimer * 60 * 60  -- Used in print and cmd feedback
 local NextAHBotBuyCycle    = os.time() + AHBuyTimer * 60 * 60 -- Used in print and cmd feedback 
 local AHBotSellEventId                                        -- Used to track if running, for cmd etc
@@ -318,7 +322,7 @@ local ItemTemplateQuery = [[
            bonding, BagFamily, flags, name, MaxDurability, ContainerSlots,
            RandomProperty, spellcharges_1, spellcharges_2, spellcharges_3,
            spellcharges_4, spellcharges_5, duration, AllowableRace,
-           RandomSuffix
+           RandomSuffix, HolidayId
     FROM item_template
 ]]
 
@@ -505,6 +509,28 @@ local function IsInList(list, value)
     return false
 end
 
+local holidayEvents = {} -- [Holidays.dbc ID] = game_event entries for that holiday
+
+if HolidayItemsInSeason then
+    WorldDBQueryAsync("SELECT eventEntry, holiday FROM game_event WHERE holiday <> 0", function(result)
+        if result then
+            repeat
+                local holiday = result:GetUInt32(1)
+                holidayEvents[holiday] = holidayEvents[holiday] or {}
+                table.insert(holidayEvents[holiday], result:GetUInt32(0))
+            until not result:NextRow()
+        end
+    end)
+end
+
+local function IsHolidayActive(holiday)
+    if not IsGameEventActive then return false end
+    for _, eventEntry in ipairs(holidayEvents[holiday] or {}) do
+        if IsGameEventActive(eventEntry) then return true end
+    end
+    return false
+end
+
 local function BuildItemPools()
     local pools = {}
     local poolsByKey = {}
@@ -522,6 +548,7 @@ local function BuildItemPools()
         table.insert(pool.items, item)
         pool.maxPicks[item] = maxPicks
         pool.totalPicks = pool.totalPicks + maxPicks
+        if item.HolidayId ~= 0 then pool.hasHolidayItems = true end
     end
 
     for _, item in pairs(itemCache) do
@@ -608,9 +635,29 @@ local function SelectRandomItems(batchSize)
     -- Per-cycle state: items [1, available] of each pool can still be picked
     local available = {}
     local picksLeft = {}
+    local activeHolidays = {}
     for i, pool in ipairs(itemPools) do
         available[i] = #pool.items
         picksLeft[i] = pool.totalPicks
+
+        -- Move holiday items whose holiday isn't on out of this cycle's available range
+        if HolidayItemsInSeason and pool.hasHolidayItems then
+            local items = pool.items
+            local j = 1
+            while j <= available[i] do
+                local holiday = items[j].HolidayId
+                if holiday ~= 0 then
+                    if activeHolidays[holiday] == nil then activeHolidays[holiday] = IsHolidayActive(holiday) end
+                    if not activeHolidays[holiday] then
+                        picksLeft[i] = picksLeft[i] - pool.maxPicks[items[j]]
+                        items[j], items[available[i]] = items[available[i]], items[j]
+                        available[i] = available[i] - 1
+                        j = j - 1
+                    end
+                end
+                j = j + 1
+            end
+        end
     end
     local bracketWeights = GetBracketPoolWeights()
     local timesPicked = {}
@@ -1479,6 +1526,31 @@ function AddAuctions(specificHouse)
 end
 
 local marketFactorsLoaded = false
+local bannedItemsLoaded = false
+local bannedItems = {} -- [entry] = cached item data (or true if it wasn't cached), for items banned with .ahbot ban
+
+-- Removes an item from what the bots sell and buy. Its cached data is kept, so it can be unbanned without a reload.
+local function BanCachedItem(entry)
+    bannedItems[entry] = itemCache[entry] or bannedItems[entry] or true
+    if itemCache[entry] then
+        itemCache[entry] = nil
+        ItemTemplateSize = ItemTemplateSize - 1
+        itemPools = nil -- Rebuilt on the next sell cycle
+    end
+end
+
+local function LoadBannedItems(callback)
+    if bannedItemsLoaded then return callback() end
+    CharDBQueryAsync("SELECT entry FROM ahbot_banned", function(result)
+        if result then
+            repeat
+                BanCachedItem(result:GetUInt32(0))
+            until not result:NextRow()
+        end
+        bannedItemsLoaded = true
+        callback()
+    end)
+end
 
 -- Raises the price factor of items whose bot listings sold and lowers it for those that expired unsold
 local function UpdateMarketPrices(callback)
@@ -1589,9 +1661,11 @@ local function AHBot_SellItems(_, _, _, specificHouse)
     else
         currentHouse = specificHouse
     end
-    UpdateMarketPrices(function()
-        RefreshPlayerLevels(function()
-            AddAuctions(specificHouse)
+    LoadBannedItems(function()
+        UpdateMarketPrices(function()
+            RefreshPlayerLevels(function()
+                AddAuctions(specificHouse)
+            end)
         end)
     end)
 end
@@ -1640,7 +1714,6 @@ end
 -- Initialize item_template cache and initial event scheduling
 ---------------------------------------------------------------------------------
 
-local ItemTemplateSize = 0
 
 CreateLuaEvent(function()
     WorldDBQueryAsync(ItemTemplateQuery, function(results)
@@ -1678,6 +1751,7 @@ CreateLuaEvent(function()
                     duration = results:GetUInt32(26),
                     race = results:GetInt32(27),
                     RandomSuffix = results:GetInt32(28),
+                    HolidayId = results:GetUInt32(29),
                     craftedBy = 0
                 }
                 ItemTemplateSize = ItemTemplateSize + 1
@@ -1805,6 +1879,9 @@ local function AHBot_Cmd(event, player, command)
         player:SendBroadcastMessage("|- .ahbot set batchsize <number>: Changes how many items the auction bots processes per cycle.")
         player:SendBroadcastMessage("|- .ahbot set buycycle <hours>: Changes how often the auction house bot checks the auction house to take action.")
         player:SendBroadcastMessage("|- .ahbot set sellcycle <hours>: Changes how often the auction house bot checks the auction house to take action.")
+        player:SendBroadcastMessage("|- .ahbot price <item ID>: Shows what the bots would list an item for and pay for it, per auction house.")
+        player:SendBroadcastMessage("|- .ahbot ban <item ID>: Stops the bots selling and buying an item, and removes its bot auctions.")
+        player:SendBroadcastMessage("|- .ahbot unban <item ID>: Lets the bots sell and buy a banned item again.")
         return false
         
     elseif command:lower() == "ahbot info" then
@@ -2008,6 +2085,80 @@ local function AHBot_Cmd(event, player, command)
         end
         return false
     
+    elseif command:lower():find("^ahbot%s+price%s+") then
+        local entry = tonumber(command:match("^%S+%s+%S+%s+(%d+)"))
+        local item = entry and itemCache[entry]
+        if not entry then
+            player:SendBroadcastMessage("|cFFD8D8E6[Eluna AH Bot GM]|r: Usage: .ahbot price <item ID>")
+            return false
+        elseif not item then
+            local reason = bannedItems[entry] and "it is banned (.ahbot unban " .. entry .. " to allow it)" or "it isn't in the bots' item pool (filtered out, or not a valid item)"
+            player:SendBroadcastMessage("|cFFD8D8E6[Eluna AH Bot GM]|r: Item " .. entry .. " isn't sold by the bots: " .. reason .. ".")
+            return false
+        end
+
+        local function formatMoney(copper)
+            copper = math.floor(copper)
+            return string.format("%dg %02ds %02dc", math.floor(copper / 10000), math.floor(copper / 100) % 100, copper % 100)
+        end
+
+        -- Average a few samples, as some price adjustments are randomized
+        local samples, sellBase, buyBase = 50, 0, 0
+        for _ = 1, samples do
+            sellBase = sellBase + CalculateItemCost(item, SellerCostFormula) / samples
+            buyBase = buyBase + CalculateItemCost(item, BuyerCostFormula) * BotsPriceTolerance / samples
+        end
+
+        player:SendBroadcastMessage("|cFFD8D8E6[Eluna AH Bot GM]|r: " .. item.name .. " (" .. entry .. "), max stack " .. item.stackable .. (item.HolidayId ~= 0 and ", holiday item" or "") .. ". Prices per unit:")
+        for _, houseId in ipairs(EnabledAuctionHouses) do
+            local factor = MarketPrices and GetMarketFactor(houseId, entry) or 1
+            local houseFactor = HousePriceModifiers[houseId] or 1
+            player:SendBroadcastMessage(string.format("|- House %d: lists at about %s (+/- %d%%), pays up to about %s. Market factor %.2f.",
+                houseId, formatMoney(sellBase * houseFactor * factor), SellPriceVariance or 0, formatMoney(buyBase * houseFactor * factor), factor))
+        end
+        return false
+
+    elseif command:lower():find("^ahbot%s+ban%s+") then
+        local entry = tonumber(command:match("^%S+%s+%S+%s+(%d+)"))
+        if not entry then
+            player:SendBroadcastMessage("|cFFD8D8E6[Eluna AH Bot GM]|r: Usage: .ahbot ban <item ID>")
+            return false
+        end
+        local itemName = itemCache[entry] and itemCache[entry].name or ("item " .. entry)
+        BanCachedItem(entry)
+        CharDBExecute("INSERT IGNORE INTO ahbot_banned (entry) VALUES (" .. entry .. ")")
+
+        -- Remove the item's bot auctions, except those a player has bid on
+        local query = "DELETE a, ii" .. (MarketPrices and ", l" or "") .. " FROM auctionhouse a JOIN item_instance ii ON ii.guid = a.itemguid " ..
+            (MarketPrices and "LEFT JOIN ahbot_listings l ON l.id = a.id AND l.itemguid = a.itemguid " or "") ..
+            "WHERE ii.itemEntry = " .. entry .. " AND a.itemowner IN (" .. botList .. ") AND (a.buyguid = 0 OR a.buyguid IN (" .. botList .. "))"
+        CharDBQueryAsync(query, function()
+            SendMessageToGMs("GM " .. name .. " banned " .. itemName .. " (" .. entry .. ") from the auction house bots. Refreshing auctions cache...")
+            RunCommand("reload auctions")
+        end)
+        print("[Eluna AH Bot]: GM " .. player:GetGUIDLow() .. " banned item " .. entry .. ".")
+        return false
+
+    elseif command:lower():find("^ahbot%s+unban%s+") then
+        local entry = tonumber(command:match("^%S+%s+%S+%s+(%d+)"))
+        if not entry then
+            player:SendBroadcastMessage("|cFFD8D8E6[Eluna AH Bot GM]|r: Usage: .ahbot unban <item ID>")
+            return false
+        end
+        CharDBExecute("DELETE FROM ahbot_banned WHERE entry = " .. entry)
+        local item = bannedItems[entry]
+        bannedItems[entry] = nil
+        if type(item) == "table" then
+            itemCache[entry] = item
+            ItemTemplateSize = ItemTemplateSize + 1
+            itemPools = nil -- Rebuilt on the next sell cycle
+            SendMessageToGMs("GM " .. name .. " unbanned " .. item.name .. " (" .. entry .. ") for the auction house bots.")
+        else
+            player:SendBroadcastMessage("|cFFD8D8E6[Eluna AH Bot GM]|r: Item " .. entry .. " unbanned. It wasn't in the bots' item pool this session, so it will be sold after the next .reload eluna, if the item filters allow it.")
+        end
+        print("[Eluna AH Bot]: GM " .. player:GetGUIDLow() .. " unbanned item " .. entry .. ".")
+        return false
+
     elseif command:find("ahbot.+") then
         player:SendBroadcastMessage("|cFFD8D8E6[Eluna AH Bot GM]|r: Syntax error. Type .ahbot to see available commands.")
         return false

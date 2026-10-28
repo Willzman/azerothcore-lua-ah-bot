@@ -52,6 +52,7 @@
 	<li><strong>Market Memory</strong> - Each auction house remembers a price factor per item: raised when it sells better than the auction house average, lowered when it sells worse, so prices hold steady even when most listings expire. Stored in the <code>ahbot_market</code> table (<code>MarketPrices</code>, <code>MarketPriceStep</code>, <code>MarketPriceLimits</code>). The neutral auction house runs higher prices (<code>HousePriceModifiers</code>).</li>
 	<li><strong>Normal Stack Sizes</strong> - Stacks of 1, 5, 10, 20 or full stacks, with cheap materials mostly in full stacks. Popular materials and consumables get several listings at slightly increasing prices (<code>StackSizeWeights</code>, <code>MultiListClasses</code>).</li>
 	<li><strong>Demand-Based Weights</strong> - Trade goods, consumables, gems, glyphs and BoE greens make up most listings (<code>ItemWeights</code>).</li>
+	<li><strong>Holiday Items in Season</strong> - Winter Veil, Hallow's End and other holiday items are only posted while their holiday is active (<code>HolidayItemsInSeason</code>).</li>
 	<li><strong>Follows Player Levels</strong> - Gear and consumable listings lean towards the levels of recently active players (<code>MatchPlayerLevels</code>, <code>PlayerActivityDays</code>).</li>
 	<li><strong>Human-Like Buyers</strong> - Better deals are likelier to be bought, auctions aren't bought the moment they're listed, bots occasionally buy from and outbid each other, and never buy or bid on their own auctions. Bots value items at the price they would list them for themselves, and buy at most a few auctions per cycle (<code>BotsPriceTolerance</code>, <code>MaxBuysPerCycle</code>, <code>DealChanceMultiplier</code>, <code>BuyDelayMin</code>/<code>BuyDelayMax</code>, <code>BotsBuyFromBots</code>, <code>BotToBotBuyFactor</code>, <code>BotsOutbidBots</code>).</li>
 </ul>
@@ -68,6 +69,7 @@
 <h2>Additional Features</h2>
 <ul>
 	<li><strong>GM Messaging</strong> - Sends messages to online GMs to notify them of bot actions or critical errors.</li>
+	<li><strong>Price Check and Item Bans</strong> - <code>.ahbot price &lt;item ID&gt;</code> shows what the bots list an item for and pay for it per auction house. <code>.ahbot ban &lt;item ID&gt;</code> stops the bots selling and buying an item and removes its bot auctions; <code>.ahbot unban &lt;item ID&gt;</code> undoes it. Bans are stored in the <code>ahbot_banned</code> table.</li>
 	<li><strong>In-Game Management Comamnds</strong> - Type 'ahbot' to manage your AH bots.<br>
   <br><img src="https://raw.githubusercontent.com/mostlynick3/azerothcore-lua-ah-bot/master/images/commands.png" alt="In-Game Commands">
 </li>
