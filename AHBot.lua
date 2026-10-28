@@ -199,6 +199,12 @@ local NeverSellIDs            = {                               -- Default: Vari
                                -- Deprecated Classic mounts
                                1041, 1133, 1134, 2413, 2415, 5663, 5874, 5875, 
                                8583, 8589, 8590, 8627, 8628, 8630, 8633, 14062,
+                               -- GM and test items that names don't give away
+                                 17, -- Martin Fury
+                              12947, -- Alex's Ring of Audacity
+                                873, -- Staff of Jordan
+                              24071, 32914, 37611, -- Bland Dagger, Bland Shiv, Epic Bland Dagger
+                              25582, 25627, -- QR 9867 Druid Moonkin Belt, QR 9922 Shield (quest reward placeholders)
                                -- Add more item IDs if needed
                                }
 
@@ -362,6 +368,14 @@ if EnableItemFilters then
             "'Monster -%'", "'%90 Epic%'", "'%90 Blue%'", "'%90 Green%'"
         }
         table.insert(conditions, "BINARY name NOT LIKE " .. table.concat(placeholderNames, " AND BINARY name NOT LIKE "))
+        -- Case-insensitive: test items ("Fast Test Polearm", "Pirates Patch (Test)") and items marked do not distribute,
+        -- not yet implemented, placeholder or internal
+        local testNames = {
+            "'test'", "'test %'", "'% test'", "'% test %'", "'%(test)%'", "'%(test %'", "'% test)%'",
+            "'%(dnd)%'", "'%[dnd]%'", "'%(nyi)%'", "'%(pt)%'", "'%internal %'"
+        }
+        table.insert(conditions, "name NOT LIKE " .. table.concat(testNames, " AND name NOT LIKE "))
+        table.insert(conditions, "quality <> 6") -- Artifact quality items are GM items in WotLK
     else
         -- Container size filter
         if MinContainerSize then
