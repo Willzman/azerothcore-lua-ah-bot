@@ -23,25 +23,25 @@ local AHBots                = {1, 2, 3}      -- Default: 1, 2, 3. Chooses which 
 local EnabledAuctionHouses  = {2, 6, 7}      -- Default: 2, 6, 7. Possible values: 2 is ally, 6 is horde, 7 is cross faction (neutral). Multiple values accepted, like {2, 6, 7}. Only 7 is required on cross-faction servers.
 local AHBotActionDebug      = true           -- Default: False. Enables various action debug prints. Critical prints will still be active even if false.
 local AHBotItemDebug        = false          -- Default: False. Enables debug prints on item handling, cost per item entry, Quality, etc.
-local ActionsPerCycle       = 500            -- Default: 500 (items). Batch size per auction house at peak hours (see HourlySellMultipliers). The higher the value, the faster the bots fill the AH up to the min auctions limit and the more items they buy, at the expense of performance.
+local ActionsPerCycle       = 150            -- Default: 500 (items). Batch size per auction house at peak hours (see HourlySellMultipliers). The higher the value, the faster the bots fill the AH up to the min auctions limit and the more items they buy, at the expense of performance.
 local StartupDelay          = 1000           -- Default: 1000 (ms). Delay after startup/Eluna reload before the auction house initializes. Having this set to 0 will cause lag on initial world load. 
 local EnableGMMessages      = true           -- Default: True. Messages all online GMs on command and initiation events.
 local AnnounceOnLogin       = true           -- Default: True. Announces to all players on login that this server runs the Eluna AH Bot module.
-local ClearBotMailbox       = false          -- Default: False. If enabled, periodically clears bots' mailbox, including the items in it. Ensures no overflow from bot mailbox filling up with expired/sold/bought auctions. Recommended when selling often.
+local ClearBotMailbox       = true           -- Default: False. If enabled, periodically clears bots' mailbox, including the items in it. Ensures no overflow from bot mailbox filling up with expired/sold/bought auctions. Recommended when selling often.
 
 -------------------------------------------------------------------------------------------------------------------------
 -- Buyer Configs
 -------------------------------------------------------------------------------------------------------------------------
 
 local EnableBuyer           = true           -- Default: True.
-local AHBuyTimer            = 0.5            -- Default: 0.5 (hours). How often the AH bot will try to purchase a few items.
+local AHBuyTimer            = 1              -- Default: 0.5 (hours). How often the AH bot will try to purchase a few items.
 local ItemLevelLimit        = 187            -- Default: 187. Prevents bots from buying items above this item level, to ensure players get access to those items instead.
-local BotsBuyFromBots       = true           -- Default: True. Lets bots buy and bid on other bots' auctions (scaled down by BotToBotBuyFactor), so some bot auctions sell before they expire.
+local BotsBuyFromBots       = false          -- Default: True. Lets bots buy and bid on other bots' auctions (scaled down by BotToBotBuyFactor), so some bot auctions sell before they expire.
 local BotToBotBuyFactor     = 0.2            -- Default: 0.2. Multiplies the buyout/bid chances on other bots' auctions.
 local BuyerCostFormula      = 1              -- Default: 1. 1 = Quality based scaling, 2 = Entry ID influenced, 3 = Quality/Level focused, 4 = Balanced multi-factor, 5 = Progressive thresholds, 6 = Random (1000-1000000)
 local BotsPriceTolerance    = 1.0            -- Default: 1.0. How much bots pay at most, relative to the price they would list the item at themselves (including market prices). 1.0 = only buy below the bots' own price.
-local PlaceBidChance        = 20             -- Default: 10 (%). Setting to 0 disables bids. 
-local PlaceBuyoutChance     = 10             -- Default: 5 (%). Settings to 0 disables buyouts.
+local PlaceBidChance        = 5              -- Default: 10 (%). Setting to 0 disables bids. 
+local PlaceBuyoutChance     = 3              -- Default: 5 (%). Settings to 0 disables buyouts.
 local BuyOnStartup          = true           -- Default: True. Buyer bot will start buying auctions immediately on server start, instead of on AHBuyTimer. If false, will still activate on AHBuyTimer. 
 local DisableBidFight       = true           -- Default: True. Don't place bids/buyouts on items that players have already placed bids on
 local BotsOutbidBots        = true           -- Default: True. Bots may outbid other bots' bids, so bid prices move. Players' bids are only outbid if DisableBidFight is false.
@@ -60,7 +60,7 @@ local MinAuctions           = 2000          -- Default: 2000. Min number of auct
 local RepopulationChance    = 30            -- Default: 30. Percentage chance to partially restock AH if stock is between max and min during a periodical check. Can be overriden to force populate whenever with ".ahbot auctions add". 
 local SellerCostFormula     = 1             -- Default: 1. 1 = Quality based scaling, 2 = Entry ID influenced, 3 = Quality/Level focused, 4 = Balanced multi-factor, 5 = Progressive thresholds, 6 = Random (1000-1000000)
 local SellPriceVariance     = 20            -- Default: 20. How many % to randomize prices with. 
-local AHSellTimer           = 5             -- Default: 5 (hours). How often the AH bot will check whether it needs to put up new auctions, in hours. Minimum 1.
+local AHSellTimer           = 1             -- Default: 5 (hours). How often the AH bot will check whether it needs to put up new auctions, in hours. Minimum 1.
 local HourlySellMultipliers = {             -- Share of ActionsPerCycle posted per sell cycle by server hour (0-23), from 0 to 1. Busier evenings, quiet nights.
     [0] = 0.4, [1] = 0.3, [2] = 0.2, [3] = 0.2, [4] = 0.2, [5] = 0.2,       -- Only applies while an auction house has at least MinAuctions,
     [6] = 0.3, [7] = 0.4, [8] = 0.5, [9] = 0.5, [10] = 0.6, [11] = 0.6,     -- below that the full ActionsPerCycle is posted.
