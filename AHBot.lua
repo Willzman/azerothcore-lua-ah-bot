@@ -90,6 +90,8 @@ local MultiListChance       = 40            -- Default: 40 (%). Chance for an it
 local MaxExtraListings      = 3             -- Default: 3. Maximum number of extra listings per item.
 local MatchPlayerLevels     = 0.5           -- Default: 0.5. From 0 to 1, how strongly gear and consumable listings follow the levels of recently active players. 0 or false disables.
 local PlayerActivityDays    = 7             -- Default: 7. Characters who logged in within this many days count as active for MatchPlayerLevels.
+local IgnoreGMLevels        = true          -- Default: True. Characters on GM accounts don't count for MatchPlayerLevels. GM accounts are read from the auth database's account_access table, plus any GM online.
+local IgnoredLevelAccounts  = {}            -- Default: {}. Account IDs whose characters never count for MatchPlayerLevels, e.g. {1, 5}. Use if your Eluna can't query the auth database.
 
 -------------------------------------------------------------------------------------------------------------------------
 -- Item Seller Filter Configs
@@ -1661,28 +1663,58 @@ local function UpdateMarketPrices(callback)
 end
 
 -- Counts recently active players per level bracket, so listings can follow their levels
+-- Accounts whose characters don't count for MatchPlayerLevels: GM accounts and IgnoredLevelAccounts
+local function GetIgnoredLevelAccounts(callback)
+    local accounts = {}
+    for _, accountId in ipairs(IgnoredLevelAccounts or {}) do
+        accounts[accountId] = true
+    end
+    if not IgnoreGMLevels then return callback(accounts) end
+
+    for _, player in pairs(GetPlayersInWorld()) do
+        if player:GetGMRank() > 0 then
+            accounts[player:GetAccountId()] = true
+        end
+    end
+
+    if not AuthDBQueryAsync then return callback(accounts) end -- Older Eluna: only online GMs and IgnoredLevelAccounts
+    AuthDBQueryAsync("SELECT id FROM account_access WHERE gmlevel > 0", function(result)
+        if result then
+            repeat
+                accounts[result:GetUInt32(0)] = true
+            until not result:NextRow()
+        end
+        callback(accounts)
+    end)
+end
+
+-- Counts recently active players per level bracket, so listings can follow their levels
 local function RefreshPlayerLevels(callback)
     if not MatchPlayerLevels or MatchPlayerLevels <= 0 then return callback() end
 
-    local since = os.time() - PlayerActivityDays * 24 * 3600
-    CharDBQueryAsync(string.format("SELECT level FROM characters WHERE (online = 1 OR logout_time > %d) AND guid NOT IN (%s)", since, botList), function(result)
-        local counts, total = {}, 0
-        if result then
-            repeat
-                local bracket = GetLevelBracket(result:GetUInt32(0))
-                counts[bracket] = (counts[bracket] or 0) + 1
-                total = total + 1
-            until not result:NextRow()
-        end
-
-        playerLevelShares = nil
-        if total > 0 then
-            playerLevelShares = {}
-            for bracket, count in pairs(counts) do
-                playerLevelShares[bracket] = count / total
+    GetIgnoredLevelAccounts(function(ignoredAccounts)
+        local since = os.time() - PlayerActivityDays * 24 * 3600
+        CharDBQueryAsync(string.format("SELECT level, account FROM characters WHERE (online = 1 OR logout_time > %d) AND guid NOT IN (%s)", since, botList), function(result)
+            local counts, total = {}, 0
+            if result then
+                repeat
+                    if not ignoredAccounts[result:GetUInt32(1)] then
+                        local bracket = GetLevelBracket(result:GetUInt32(0))
+                        counts[bracket] = (counts[bracket] or 0) + 1
+                        total = total + 1
+                    end
+                until not result:NextRow()
             end
-        end
-        callback()
+
+            playerLevelShares = nil
+            if total > 0 then
+                playerLevelShares = {}
+                for bracket, count in pairs(counts) do
+                    playerLevelShares[bracket] = count / total
+                end
+            end
+            callback()
+        end)
     end)
 end
 

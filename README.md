@@ -94,6 +94,8 @@
 	<tr><td><code>MultiListChance / MaxExtraListings</code></td><td><code>40 / 3</code></td><td>Chance (%) of extra listings, and how many at most.</td></tr>
 	<tr><td><code>MatchPlayerLevels</code></td><td><code>0.5</code></td><td>From 0 to 1, how strongly gear and consumable listings follow the levels of recently active players. 0 disables.</td></tr>
 	<tr><td><code>PlayerActivityDays</code></td><td><code>7</code></td><td>Characters who logged in within this many days count as active.</td></tr>
+	<tr><td><code>IgnoreGMLevels</code></td><td><code>true</code></td><td>Characters on GM accounts don't count. GM accounts are read from the auth database's <code>account_access</code> table (if your Eluna supports auth database queries), plus any GM who is online.</td></tr>
+	<tr><td><code>IgnoredLevelAccounts</code></td><td><code>{}</code></td><td>Account IDs whose characters never count, like <code>{1, 5}</code>. Useful if your Eluna can't query the auth database and your GM is offline.</td></tr>
 </table>
 
 <h3>Item Filters</h3>
