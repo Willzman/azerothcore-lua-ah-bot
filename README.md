@@ -1,5 +1,5 @@
 
-<h1>Eluna AH Bot - Project is WIP but functional</h1>
+<h1>Eluna AH Bot</h1>
 <p>This is Willzman's version of the <strong>Eluna AH Bot</strong> module, a fork of <a href="https://github.com/mostlynick3/azerothcore-lua-ah-bot" target="_blank">mostlynick3's original</a>. This script is designed for automated auction house operations in AzerothCore emulation environments. It supports both buyer and seller functionalities, and is designed to be plug-and-play with extensive configuration options.</p>
 <img src="https://raw.githubusercontent.com/mostlynick3/azerothcore-lua-ah-bot/master/icon.png" alt="Settings Image">
 
