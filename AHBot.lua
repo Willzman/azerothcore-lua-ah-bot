@@ -54,7 +54,7 @@ local MinAuctions           = 2000          -- Default: 2000. Min number of auct
 local RepopulationChance    = 30            -- Default: 30. Percentage chance to partially restock AH if stock is between max and min during a periodical check. Can be overriden to force populate whenever with ".ahbot auctions add". 
 local CostFormula           = 1             -- Default: 1. 1 = Quality based scaling, 2 = Entry ID influenced, 3 = Quality/Level focused, 4 = Balanced multi-factor, 5 = Progressive thresholds, 6 = Random (1000-1000000)
 local SellPriceVariance     = 20            -- Default: 20. How many % to randomize prices with. 
-local AHSellTimer           = 5             -- Default: 5 (hours). How often the AH bot will check whether it needs to put up new auctions, in hours.
+local AHSellTimer           = 5             -- Default: 5 (hours). How often the AH bot will check whether it needs to put up new auctions, in hours. Minimum 1.
 local SellOnStartup         = true          -- Default: True. Used for debugging and instantly populating an empty auction house. If true, fires AH bot on Eluna load (startup / Eluna reloads). If false, activates on AHSellTimer. 
 local ApplyRandomProperties = true          -- Default: True. Adds enchant/random stats and corresponding name to items (e.g., "of the Eagle"). This is DBC-based with Lua tables copied into this script. Disable if non-WotLK core.
 local SetAsCraftedBy        = true          -- Default: True. Marks items created by player spells as created by the AH bot posting the item.
@@ -169,6 +169,8 @@ local NeverSellIDs            = {                               -- Default: Vari
 -------------------------------------------------------------------------------------------------------------------------
 
 if not EnableAHBot then return end
+
+if AHSellTimer < 1 then AHSellTimer = 1 end -- Sell cycles must be at least 1 hour apart
 
 -------------------------------------------------------------------------------------------------------------------------
 -- Helper functions, tables, etc.
@@ -444,97 +446,101 @@ local function CheckAuctions(houseId, callback)
     end)
 end
 
-local function SelectRandomItems()
-    local groupedItems = {
-        Gear = {},
-        Mats = {},
-        Glyph = {},
-        Projectile = {},
-        Other = {},
-        SpecificItems = {}
-    }
-    
-    -- Helper function to add weighted items to a group
-    local function addWeightedItems(group, item, weight)
-        for i = 1, weight do
-            table.insert(group, item)
+-- Weighted item pools, built once from itemCache on first use. Each pool lists every item once and
+-- caps how many times an item may be picked per cycle, instead of storing an item once per weight point.
+local itemPools
+
+local function BuildItemPools()
+    local pools = {}
+    local poolsByKey = {}
+
+    local function addToPool(key, weight, item, maxPicks)
+        maxPicks = math.floor(maxPicks)
+        if not weight or weight <= 0 or maxPicks < 1 then return end
+        local pool = poolsByKey[key]
+        if not pool then
+            pool = {weight = weight, items = {}, maxPicks = {}, totalPicks = 0, usesCount = false}
+            poolsByKey[key] = pool
+            table.insert(pools, pool)
         end
+        table.insert(pool.items, item)
+        pool.maxPicks[item] = maxPicks
+        pool.totalPicks = pool.totalPicks + maxPicks
     end
-    
-    -- Group items by type and quality
+
     for _, item in pairs(itemCache) do
         if ItemWeights.SpecificItems[item.entry] then
-            addWeightedItems(groupedItems.SpecificItems, item, ItemWeights.SpecificItems[item.entry])
+            local weight = ItemWeights.SpecificItems[item.entry]
+            addToPool("SpecificItems", weight, item, weight)
         elseif item.class == 2 or item.class == 4 then
-            local quality = item.Quality
-            groupedItems.Gear[quality] = groupedItems.Gear[quality] or {}
-            addWeightedItems(groupedItems.Gear[quality], item, ItemWeights.Gear[getQualityString(quality)])
+            local weight = ItemWeights.Gear[getQualityString(item.Quality)]
+            addToPool("Gear" .. item.Quality, weight, item, weight or 0)
         elseif item.class == 7 then
-            local quality = item.Quality
-            groupedItems.Mats[quality] = groupedItems.Mats[quality] or {}
-            addWeightedItems(groupedItems.Mats[quality], item, ItemWeights.Mats[getQualityString(quality)])
+            local weight = ItemWeights.Mats[getQualityString(item.Quality)]
+            addToPool("Mats" .. item.Quality, weight, item, weight or 0)
         elseif item.class == 6 then
-            addWeightedItems(groupedItems.Projectile, item, ItemWeights.Projectile)
+            addToPool("Projectile", ItemWeights.Projectile, item, ItemWeights.Projectile)
         elseif item.class == 16 then
-            addWeightedItems(groupedItems.Glyph, item, ItemWeights.Glyph)
+            addToPool("Glyph", ItemWeights.Glyph, item, ItemWeights.Glyph)
         else
-            addWeightedItems(groupedItems.Other, item, ItemWeights.Other)
+            addToPool("Other", ItemWeights.Other, item, ItemWeights.Other)
         end
     end
-    
-    -- Helper function to add group to weight map if it has items
-    local function addToWeightMap(weightMap, items, weight, totalWeight)
-        if #items > 0 and weight > 0 then
-            totalWeight = totalWeight + weight
-            table.insert(weightMap, {
-                weight = weight,
-                items = items,
-                cumWeight = totalWeight
-            })
-        end
-        return totalWeight
+
+    -- Specific items are weighted by how many picks they have left, as each item has its own weight
+    if poolsByKey.SpecificItems then
+        poolsByKey.SpecificItems.usesCount = true
     end
-    
+
+    return pools
+end
+
+local function SelectRandomItems()
+    if not itemPools then itemPools = BuildItemPools() end
+
+    -- Per-cycle state: items [1, available] of each pool can still be picked
+    local available = {}
+    local picksLeft = {}
+    for i, pool in ipairs(itemPools) do
+        available[i] = #pool.items
+        picksLeft[i] = pool.totalPicks
+    end
+    local timesPicked = {}
+
     local selectedItems = {}
-    for i = 1, ActionsPerCycle do
+    for _ = 1, ActionsPerCycle do
         local totalWeight = 0
-        local weightMap = {}
-        
-        -- Add quality-based groups (Gear and Mats)
-        for groupName, qualityGroups in pairs({Gear = groupedItems.Gear, Mats = groupedItems.Mats}) do
-            for quality, items in pairs(qualityGroups) do
-                local weight = ItemWeights[groupName][getQualityString(quality)]
-                totalWeight = addToWeightMap(weightMap, items, weight, totalWeight)
+        local cumWeights = {}
+        for i, pool in ipairs(itemPools) do
+            if available[i] > 0 then
+                totalWeight = totalWeight + (pool.usesCount and picksLeft[i] or pool.weight)
             end
+            cumWeights[i] = totalWeight
         end
-        
-        -- Add simple groups
-        local simpleGroups = {
-            {groupedItems.Glyph, ItemWeights.Glyph},
-            {groupedItems.Projectile, ItemWeights.Projectile},
-            {groupedItems.Other, ItemWeights.Other},
-            {groupedItems.SpecificItems, #groupedItems.SpecificItems} -- Use count as weight
-        }
-        
-        for _, group in ipairs(simpleGroups) do
-            totalWeight = addToWeightMap(weightMap, group[1], group[2], totalWeight)
-        end
-        
+
         if totalWeight <= 0 then break end
-        
-        -- Select weighted random item
+
+        -- Select weighted random pool, then a random item within it
         local rand = math.random() * totalWeight
-        for _, entry in ipairs(weightMap) do
-            if rand <= entry.cumWeight then
-                local items = entry.items
-                local itemIndex = math.random(1, #items)
-                table.insert(selectedItems, items[itemIndex])
-                table.remove(items, itemIndex)
+        for i, pool in ipairs(itemPools) do
+            if available[i] > 0 and rand <= cumWeights[i] then
+                local items = pool.items
+                local itemIndex = math.random(1, available[i])
+                local item = items[itemIndex]
+                table.insert(selectedItems, item)
+
+                timesPicked[item] = (timesPicked[item] or 0) + 1
+                picksLeft[i] = picksLeft[i] - 1
+                if timesPicked[item] >= pool.maxPicks[item] then
+                    -- Swap the exhausted item out of the available range (pool order doesn't matter)
+                    items[itemIndex], items[available[i]] = items[available[i]], items[itemIndex]
+                    available[i] = available[i] - 1
+                end
                 break
             end
         end
     end
-    
+
     return selectedItems
 end
 
@@ -604,8 +610,19 @@ local function AHBot_Buy_ProcessItemResults(itemResults, auctionResults)
         stackSizes[guid] = stackSize
     until not itemResults:NextRow()
     
+    -- Group auctions by item entry, so only items that are actually listed get evaluated
+    local auctionsByEntry = {}
+    for _, auction in ipairs(auctionResults) do
+        local entry = itemEntries[auction.itemguid]
+        if entry and itemCache[entry] then
+            auctionsByEntry[entry] = auctionsByEntry[entry] or {}
+            table.insert(auctionsByEntry[entry], auction)
+        end
+    end
+
     local underpricedItems = {}
-    for _, item in pairs(itemCache) do
+    for entry, auctions in pairs(auctionsByEntry) do
+        local item = itemCache[entry]
         if AHBotItemDebug then print("[Eluna AH Bot Item Debug]: Evaluating item " .. item.entry .. " for price calculation") end
         
         local validItem = false
@@ -622,19 +639,17 @@ local function AHBot_Buy_ProcessItemResults(itemResults, auctionResults)
             if cost < 200000 then cost = math.random(50000, 250000) end
             if AHBotItemDebug then print("[Eluna AH Bot Item Debug]: Final adjusted cost for item " .. item.entry .. ": " .. cost) end
 
-            for _, auction in ipairs(auctionResults) do
-                if itemEntries[auction.itemguid] == item.entry then
-                    local count = stackSizes[auction.itemguid]
-                    local stackCost = cost * count
-                    if auction.buyoutprice < stackCost then
-                        if AHBotItemDebug then print("[Eluna AH Bot Item Debug]: Buyer - Found underpriced item " .. count .. "x " .. item.name .. " (" .. item.entry .. ") at " .. auction.buyoutprice .. " vs calculated " .. stackCost .. (count > 1 and " (" .. count .. "x " .. cost .. ")" or "")) end
-                        table.insert(underpricedItems, {
-                            entry = item.entry,
-                            auctionId = auction.id
-                        })
-                    else
-                        if AHBotItemDebug then print("[Eluna AH Bot Item Debug]: Buyer - Not buying " .. count .. "x " .. item.name .. " (" .. item.entry .. ") at " .. auction.buyoutprice .. " vs calculated " .. stackCost .. (count > 1 and " (" .. count .. "x " .. cost .. ")" or "")) end
-                    end
+            for _, auction in ipairs(auctions) do
+                local count = stackSizes[auction.itemguid]
+                local stackCost = cost * count
+                if auction.buyoutprice < stackCost then
+                    if AHBotItemDebug then print("[Eluna AH Bot Item Debug]: Buyer - Found underpriced item " .. count .. "x " .. item.name .. " (" .. item.entry .. ") at " .. auction.buyoutprice .. " vs calculated " .. stackCost .. (count > 1 and " (" .. count .. "x " .. cost .. ")" or "")) end
+                    table.insert(underpricedItems, {
+                        entry = item.entry,
+                        auctionId = auction.id
+                    })
+                else
+                    if AHBotItemDebug then print("[Eluna AH Bot Item Debug]: Buyer - Not buying " .. count .. "x " .. item.name .. " (" .. item.entry .. ") at " .. auction.buyoutprice .. " vs calculated " .. stackCost .. (count > 1 and " (" .. count .. "x " .. cost .. ")" or "")) end
                 end
             end
         end
@@ -1061,63 +1076,53 @@ local function ProcessAuctionIds(result, selectedItems, houseId, availableGuids)
     ProcessItemCreation(selectedItems, houseId, availableGuids, availableIds)
 end
 
-local function ProcessItemGuids(itemResult, selectedItems, houseId)
-    local availableGuids = {}
-    local maxGuid = 0
-    local usedGuids = {}
-    
-    -- Get highest and second highest AddedByEluna and build used GUIDs set
-    local highestAddedByEluna = 0
-    local NotAddedByEluna = 0
-    local maxGuidForSecondHighest = 0
-    
-    repeat
-        local guid = itemResult:GetUInt32(0)
-        local AddedByEluna = itemResult:GetUInt32(1)
-        
-        usedGuids[guid] = true
-        maxGuid = math.max(maxGuid, guid)
-        
-        if AddedByEluna > highestAddedByEluna then
-            NotAddedByEluna = highestAddedByEluna
-            highestAddedByEluna = AddedByEluna
-        elseif AddedByEluna > NotAddedByEluna and AddedByEluna < highestAddedByEluna then
-            NotAddedByEluna = AddedByEluna
+-- Finds free item GUIDs in the database instead of loading every item_instance row into Lua.
+-- Uses unused GUIDs below the current highest GUID first, then continues 10,000,000 above it.
+local function ProcessItemGuids(selectedItems, houseId)
+    CharDBQueryAsync("SELECT MIN(guid), MAX(guid), MAX(AddedByEluna) FROM item_instance", function(boundsResult)
+        local minGuid, maxGuid, highestAddedByEluna = 0, 0, 0
+        if boundsResult and not boundsResult:IsNull(0) then
+            minGuid = boundsResult:GetUInt32(0)
+            maxGuid = boundsResult:GetUInt32(1)
+            highestAddedByEluna = boundsResult:GetUInt32(2)
         end
-        
-        if AddedByEluna == NotAddedByEluna then
-            maxGuidForSecondHighest = math.max(maxGuidForSecondHighest, guid)
-        end
-    until not itemResult:NextRow()
-    
-    -- Find available GUIDs
-    local upperBound = NotAddedByEluna > 0 and maxGuidForSecondHighest or maxGuid
-    
-    for i = 1, upperBound do
-        if not usedGuids[i] then
-            table.insert(availableGuids, i)
-            if #availableGuids >= ActionsPerCycle then
-                break
+
+        local gapQuery = string.format([[
+            SELECT guid, nextGuid FROM (
+                SELECT guid, LEAD(guid) OVER (ORDER BY guid) AS nextGuid FROM item_instance
+            ) g WHERE nextGuid > guid + 1 ORDER BY guid LIMIT %d]], ActionsPerCycle)
+
+        CharDBQueryAsync(gapQuery, function(gapResult)
+            local availableGuids = {}
+
+            local function addRange(first, last)
+                for guid = first, last do
+                    if #availableGuids >= ActionsPerCycle then return end
+                    table.insert(availableGuids, guid)
+                end
             end
-        end
-    end
-    
-    -- Add more GUIDs if needed
-    if #availableGuids < ActionsPerCycle then
-        local nextGuid = (usedGuids[maxGuid] and highestAddedByEluna > 0) and (maxGuid + 1) or (maxGuid + 10000000)
-        
-        while #availableGuids < ActionsPerCycle do
-            table.insert(availableGuids, nextGuid)
-            nextGuid = nextGuid + 1
-        end
-    end
-    
-    if AHBotActionDebug then 
-        print("[Eluna AH Bot Debug]: Seller - Found " .. #availableGuids .. " available item GUIDs for next batch") 
-    end
-    
-    CharDBQueryAsync("SELECT id, AddedByEluna FROM auctionhouse ORDER BY AddedByEluna DESC", function(result)
-        ProcessAuctionIds(result, selectedItems, houseId, availableGuids)
+
+            if minGuid > 1 then addRange(1, minGuid - 1) end
+            if gapResult then
+                repeat
+                    addRange(gapResult:GetUInt32(0) + 1, gapResult:GetUInt32(1) - 1)
+                until #availableGuids >= ActionsPerCycle or not gapResult:NextRow()
+            end
+
+            -- Add more GUIDs if needed
+            if #availableGuids < ActionsPerCycle then
+                local nextGuid = (maxGuid > 0 and highestAddedByEluna > 0) and (maxGuid + 1) or (maxGuid + 10000000)
+                addRange(nextGuid, nextGuid + ActionsPerCycle)
+            end
+
+            if AHBotActionDebug then 
+                print("[Eluna AH Bot Debug]: Seller - Found " .. #availableGuids .. " available item GUIDs for next batch") 
+            end
+
+            CharDBQueryAsync("SELECT id, AddedByEluna FROM auctionhouse ORDER BY AddedByEluna DESC", function(result)
+                ProcessAuctionIds(result, selectedItems, houseId, availableGuids)
+            end)
+        end)
     end)
 end
 
@@ -1126,9 +1131,7 @@ local function ProcessAuctionCheck(auctionCount, houseId)
         local selectedItems = SelectRandomItems()
         if AHBotActionDebug then print("[Eluna AH Bot Debug]: Seller - Item selection complete.") end
 
-        CharDBQueryAsync("SELECT guid, AddedByEluna FROM item_instance ORDER BY AddedByEluna DESC", function(itemResult)
-            ProcessItemGuids(itemResult, selectedItems, houseId)
-        end)
+        ProcessItemGuids(selectedItems, houseId)
     else
         if AHBotActionDebug then 
             print("[Eluna AH Bot Debug]: Seller - Action house at capacity (Min auctions: "..MinAuctions..". Current auctions: ".. tostring(auctionCount) .." / " .. MaxAuctions .. "). No action taken, awaiting next cycle on ".. os.date("%H:%M", NextAHBotSellCycle) .. " server time.") 
@@ -1246,12 +1249,9 @@ CreateLuaEvent(function()
             if AHBotActionDebug then print("[Eluna AH Bot]: Core - Finished caching item_template. Valid items: "..ItemTemplateSize..".") end
             
             if SetAsCraftedBy then -- Split out of the query to not delay db ops
-                for entry, item in pairs(itemCache) do
-                    for _, craftedItem in ipairs(craftedItems) do
-                        if entry == craftedItem then
-                            item.craftedBy = 1
-                            break
-                        end
+                for _, craftedItem in ipairs(craftedItems) do
+                    if itemCache[craftedItem] then
+                        itemCache[craftedItem].craftedBy = 1
                     end
                 end
             end
