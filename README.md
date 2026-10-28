@@ -1,6 +1,6 @@
 
 <h1>Eluna AH Bot - Project is WIP but functional</h1>
-<p>Welcome to mostlynick's <strong>Eluna AH Bot</strong> module! This script is designed for automated auction house operations in AzerothCore emulation environments. It supports both buyer and seller functionalities, and is designed to be plug-and-play with extensive configuration options.</p>
+<p>This is Willzman's version of the <strong>Eluna AH Bot</strong> module, a fork of <a href="https://github.com/mostlynick3/azerothcore-lua-ah-bot" target="_blank">mostlynick3's original</a>. This script is designed for automated auction house operations in AzerothCore emulation environments. It supports both buyer and seller functionalities, and is designed to be plug-and-play with extensive configuration options.</p>
 <img src="https://raw.githubusercontent.com/mostlynick3/azerothcore-lua-ah-bot/master/icon.png" alt="Settings Image">
 
 <h2>Features</h2>
@@ -60,7 +60,10 @@
 </ul>
 
 <h2>AzerothCore Module Details</h2>
-<p>Author: mostlynick3</p>
-<p>Repository: <a href="https://github.com/mostlynick3/azerothcore-lua-ah-bot" target="_blank">https://github.com/mostlynick3/azerothcore-lua-ah-bot</a>.</p>
-<p>Download ZIP: <a href="https://github.com/mostlynick3/azerothcore-lua-ah-bot/archive/refs/heads/main.zip" target="_blank">https://github.com/mostlynick3/azerothcore-lua-ah-bot/archive/refs/heads/main.zip</a>.</p>
+<p>Maintainer: Willzman</p>
+<p>Repository: <a href="https://github.com/Willzman/azerothcore-lua-ah-bot" target="_blank">https://github.com/Willzman/azerothcore-lua-ah-bot</a>.</p>
+<p>Download ZIP: <a href="https://github.com/Willzman/azerothcore-lua-ah-bot/archive/refs/heads/main.zip" target="_blank">https://github.com/Willzman/azerothcore-lua-ah-bot/archive/refs/heads/main.zip</a>.</p>
 <p>License: GPL-3.0</p>
+
+<h2>Credits</h2>
+<p>Based on the original Eluna AH Bot by <strong>mostlynick3</strong>: <a href="https://github.com/mostlynick3/azerothcore-lua-ah-bot" target="_blank">https://github.com/mostlynick3/azerothcore-lua-ah-bot</a>. Thanks to mostlynick3 and the original contributors.</p>
