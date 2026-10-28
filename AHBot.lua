@@ -20,10 +20,10 @@ if GetStateMapId() ~= -1 then return end
 
 local EnableAHBot           = true           -- Default: True. If false, AH bot is disabled. 
 local AHBots                = {1, 2, 3}      -- Default: 1, 2, 3. Chooses which player GUID lows will be used as AH bots. Must match extant characters. Not faction specific.
-local EnabledAuctionHouses  = {2, 6, 7}      -- Default: 2, 6, 7. Possible values: 2 is ally, 6 is horde, 7 is cross faction (neutral). Multiple values accepted, like {2, 6, 7}. Only 7 is required on cross-faction servers.
+local EnabledAuctionHouses  = {2, 6}         -- Default: 2, 6, 7. Possible values: 2 is ally, 6 is horde, 7 is cross faction (neutral). Multiple values accepted, like {2, 6, 7}. Only 7 is required on cross-faction servers.
 local AHBotActionDebug      = true           -- Default: False. Enables various action debug prints. Critical prints will still be active even if false.
 local AHBotItemDebug        = false          -- Default: False. Enables debug prints on item handling, cost per item entry, Quality, etc.
-local ActionsPerCycle       = 150            -- Default: 500 (items). Batch size per auction house at peak hours (see HourlySellMultipliers). The higher the value, the faster the bots fill the AH up to the min auctions limit and the more items they buy, at the expense of performance.
+local ActionsPerCycle       = 500            -- Default: 500 (items). Batch size per auction house at peak hours (see HourlySellMultipliers). The higher the value, the faster the bots fill the AH up to the min auctions limit and the more items they buy, at the expense of performance.
 local StartupDelay          = 1000           -- Default: 1000 (ms). Delay after startup/Eluna reload before the auction house initializes. Having this set to 0 will cause lag on initial world load. 
 local EnableGMMessages      = true           -- Default: True. Messages all online GMs on command and initiation events.
 local AnnounceOnLogin       = true           -- Default: True. Announces to all players on login that this server runs the Eluna AH Bot module.
@@ -55,8 +55,8 @@ local MaxBuysPerCycle       = 3              -- Default: 3. Maximum buyouts/bids
 -------------------------------------------------------------------------------------------------------------------------
 
 local EnableSeller          = true          -- Default: True.
-local MaxAuctions           = 10000         -- Default: 5000. Max number of auctions posted by the AH bot.
-local MinAuctions           = 2000          -- Default: 2000. Min number of auctions. If under this value, AH will repopulate sales. If over, but less than max, has 30% chance per check to populate AH.
+local MaxAuctions           = 15000         -- Default: 5000. Max number of auctions posted by the AH bot.
+local MinAuctions           = 10000         -- Default: 2000. Min number of auctions. If under this value, AH will repopulate sales. If over, but less than max, has 30% chance per check to populate AH.
 local RepopulationChance    = 30            -- Default: 30. Percentage chance to partially restock AH if stock is between max and min during a periodical check. Can be overriden to force populate whenever with ".ahbot auctions add". 
 local SellerCostFormula     = 1             -- Default: 1. 1 = Quality based scaling, 2 = Entry ID influenced, 3 = Quality/Level focused, 4 = Balanced multi-factor, 5 = Progressive thresholds, 6 = Random (1000-1000000)
 local SellPriceVariance     = 20            -- Default: 20. How many % to randomize prices with. 
@@ -81,6 +81,7 @@ local VendorPriceMultiplier = {4, 8}        -- Default: 4, 8. Items the cost for
 local HumanizePrices        = true          -- Default: True. Rounds prices like players type them, e.g. 4g 95s or 24g 99s 99c instead of 4g 37s 12c.
 local MarketPrices          = true          -- Default: True. Remembers a price factor per item and auction house: raised when the bot's listings sell, lowered when they expire unsold.
 local MarketPriceLimits     = {0.5, 2.0}    -- Default: 0.5, 2.0. Lowest and highest market price factor.
+local MarketPriceStep       = 0.05          -- Default: 0.05. How far one sale moves an item's price factor. Compared to the auction house's sell-through rate, so prices don't slide when most listings expire.
 local HousePriceModifiers   = {[2] = 1.0, [6] = 1.0, [7] = 1.15}  -- Default: 2 = 1.0, 6 = 1.0, 7 = 1.15. Price factor per auction house. The neutral AH takes a bigger cut, so prices there run higher.
 local StackSizeWeights      = {[1] = 15, [5] = 20, [10] = 25, [20] = 30, full = 10}  -- Default: 1 = 15, 5 = 20, 10 = 25, 20 = 30, full = 10. Relative chance of each stack size for StackedItemClasses. Sizes above an item's max stack are skipped.
 local CheapItemPrice        = 5000          -- Default: 5000 (50s). Items whose single unit costs less than this are mostly sold in full stacks.
@@ -1504,27 +1505,41 @@ local function UpdateMarketPrices(callback)
 
             local now = os.time()
             local finished = {}
-            local changed = {}
+            local outcomes = {}
+            local soldPerHouse, totalPerHouse = {}, {}
             local sold, expired = 0, 0
             repeat
                 local houseId = result:GetUInt32(2)
-                local entry = result:GetUInt32(3)
                 local wasSold = result:GetUInt32(5) == 1 or now < result:GetUInt32(4)
+                table.insert(outcomes, {houseId = houseId, entry = result:GetUInt32(3), sold = wasSold})
+
+                totalPerHouse[houseId] = (totalPerHouse[houseId] or 0) + 1
+                if wasSold then
+                    soldPerHouse[houseId] = (soldPerHouse[houseId] or 0) + 1
+                    sold = sold + 1
+                else
+                    expired = expired + 1
+                end
+                table.insert(finished, "(" .. result:GetUInt32(0) .. ", " .. result:GetUInt32(1) .. ")")
+            until not result:NextRow()
+
+            -- Judge each item against its house's sell-through rate: items selling better than average get pricier,
+            -- worse get cheaper, and on average prices hold, however few of the listings sell. No sales, no change.
+            local changed = {}
+            for _, outcome in ipairs(outcomes) do
+                local houseId, entry = outcome.houseId, outcome.entry
+                local sellThrough = (soldPerHouse[houseId] or 0) / totalPerHouse[houseId]
 
                 marketFactors[houseId] = marketFactors[houseId] or {}
                 local factor = marketFactors[houseId][entry] or 1
-                if wasSold then
-                    factor = factor * randomFloatBetween(1.03, 1.08)
-                    sold = sold + 1
+                if outcome.sold then
+                    factor = factor * (1 + MarketPriceStep * (1 - sellThrough))
                 else
-                    factor = factor * randomFloatBetween(0.92, 0.97)
-                    expired = expired + 1
+                    factor = factor * (1 - MarketPriceStep * sellThrough)
                 end
                 marketFactors[houseId][entry] = math.max(MarketPriceLimits[1], math.min(MarketPriceLimits[2], factor))
-
                 changed[houseId .. ":" .. entry] = {houseId, entry}
-                table.insert(finished, "(" .. result:GetUInt32(0) .. ", " .. result:GetUInt32(1) .. ")")
-            until not result:NextRow()
+            end
 
             local factorRows = {}
             for _, key in pairs(changed) do
