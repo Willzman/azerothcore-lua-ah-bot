@@ -45,13 +45,15 @@
 <h3>Live Server Realism</h3>
 <ul>
 	<li><strong>Real Auction Durations</strong> - Auctions run for 12, 24 or 48 hours, like players choose (<code>AuctionDurations</code>).</li>
-	<li><strong>Undercutting</strong> - Sellers post just below the cheapest listing of the same item, within limits of their own price (<code>UndercutChance</code>, <code>UndercutRange</code>, <code>UndercutLimits</code>).</li>
+	<li><strong>Undercutting</strong> - Sellers post just below the cheapest listing of the same item, within limits of their own price (<code>UndercutChance</code>, <code>UndercutRange</code>, <code>UndercutLimits</code>). By default bots only undercut each other and list at or above players' prices, so players' auctions stay competitive (<code>UndercutPlayers</code>).</li>
+	<li><strong>Vendor-Based Prices for Cheap Items</strong> - Items the price formula can't value sensibly are priced at a multiple of their vendor price, and nothing is listed below vendor price (<code>VendorPriceMultiplier</code>).</li>
+	<li><strong>Busier Evenings</strong> - Each sell cycle posts a share of <code>ActionsPerCycle</code> depending on the server hour, more in the evening and less at night (<code>HourlySellMultipliers</code>).</li>
 	<li><strong>Human-Looking Prices</strong> - Prices are rounded the way players type them, like 4g 95s or 24g 99s 99c (<code>HumanizePrices</code>).</li>
 	<li><strong>Market Memory</strong> - Each auction house remembers a price factor per item: raised when bot listings sell, lowered when they expire unsold. Stored in the <code>ahbot_market</code> table (<code>MarketPrices</code>, <code>MarketPriceLimits</code>). The neutral auction house runs higher prices (<code>HousePriceModifiers</code>).</li>
 	<li><strong>Normal Stack Sizes</strong> - Stacks of 1, 5, 10, 20 or full stacks, with cheap materials mostly in full stacks. Popular materials and consumables get several listings at slightly increasing prices (<code>StackSizeWeights</code>, <code>MultiListClasses</code>).</li>
 	<li><strong>Demand-Based Weights</strong> - Trade goods, consumables, gems, glyphs and BoE greens make up most listings (<code>ItemWeights</code>).</li>
 	<li><strong>Follows Player Levels</strong> - Gear and consumable listings lean towards the levels of recently active players (<code>MatchPlayerLevels</code>, <code>PlayerActivityDays</code>).</li>
-	<li><strong>Human-Like Buyers</strong> - Better deals are likelier to be bought, auctions aren't bought the moment they're listed, bots occasionally buy from and outbid each other, and never buy or bid on their own auctions (<code>DealChanceMultiplier</code>, <code>BuyDelayMin</code>/<code>BuyDelayMax</code>, <code>BotsBuyFromBots</code>, <code>BotToBotBuyFactor</code>, <code>BotsOutbidBots</code>).</li>
+	<li><strong>Human-Like Buyers</strong> - Better deals are likelier to be bought, auctions aren't bought the moment they're listed, bots occasionally buy from and outbid each other, and never buy or bid on their own auctions. Bots value items at the price they would list them for themselves, and buy at most a few auctions per cycle (<code>BotsPriceTolerance</code>, <code>MaxBuysPerCycle</code>, <code>DealChanceMultiplier</code>, <code>BuyDelayMin</code>/<code>BuyDelayMax</code>, <code>BotsBuyFromBots</code>, <code>BotToBotBuyFactor</code>, <code>BotsOutbidBots</code>).</li>
 </ul>
 
 <h3>Item Filters</h3>
