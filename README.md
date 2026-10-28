@@ -83,6 +83,10 @@
 	<tr><td><code>UndercutLimits</code></td><td><code>{0.6, 1.5}</code></td><td>Undercut prices stay between 60% and 150% of the bot's own price, so it doesn't follow dumped or absurd listings.</td></tr>
 	<tr><td><code>UndercutPlayers</code></td><td><code>false</code></td><td>If false, bots only undercut other bots, and list at or up to 5% above players' cheapest price instead of below it, so players' auctions stay competitive.</td></tr>
 	<tr><td><code>HumanizePrices</code></td><td><code>true</code></td><td>Rounds prices the way players type them, like 4g 95s or 24g 99s 99c.</td></tr>
+	<tr><td><code>SellVendorMounts</code></td><td><code>true</code></td><td>Also sells the Bind on Pickup mounts vendors sell for gold (racial, faction and reputation mounts), so all buyable mounts can be on the auction house. They bind to the buyer. Players themselves can't list these.</td></tr>
+	<tr><td><code>VendorMountsForTokens</code></td><td><code>false</code></td><td>Also sells vendor mounts that cost marks, honor or other tokens, at <code>MountPriceRanges</code> prices.</td></tr>
+	<tr><td><code>VendorMountMarkup</code></td><td><code>{1.1, 1.5}</code></td><td>Vendor mounts are priced at 110-150% of their vendor price.</td></tr>
+	<tr><td><code>MountPriceRanges</code></td><td><code>{[3] = {10000000, 20000000}, [4] = {50000000, 100000000}}</code></td><td>Price range in copper for mounts without a gold vendor price, like trading card and crafted mounts: rare 1,000-2,000g, epic 5,000-10,000g.</td></tr>
 	<tr><td><code>VendorPriceMultiplier</code></td><td><code>{4, 8}</code></td><td>Items the price formula values under 10 silver are priced at 4-8 times their vendor price. Nothing is listed below 1.25 times vendor price.</td></tr>
 	<tr><td><code>MarketPrices</code></td><td><code>true</code></td><td>Remembers a price factor per item and auction house, in <code>ahbot_market</code>. Items selling better than the auction house's average get pricier, worse get cheaper, and prices hold steady even when most listings expire.</td></tr>
 	<tr><td><code>MarketPriceStep</code></td><td><code>0.05</code></td><td>How far one sale moves an item's price factor.</td></tr>

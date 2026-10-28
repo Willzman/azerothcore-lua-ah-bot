@@ -76,6 +76,10 @@ local UndercutChance        = 80            -- Default: 80 (%). Chance to underc
 local UndercutRange         = {1, 5}        -- Default: 1, 5 (%). How much below the lowest listing to post when undercutting.
 local UndercutLimits        = {0.6, 1.5}    -- Default: 0.6, 1.5. Undercut prices are kept between 60% and 150% of the bot's own price, so it doesn't follow dumped or absurd listings.
 local UndercutPlayers       = false         -- Default: False. If false, bots only undercut other bots, and list at or slightly above players' lowest price instead of below it (within UndercutLimits), so players' auctions stay competitive.
+local SellVendorMounts      = true          -- Default: True. Also sells Bind on Pickup mounts that vendors sell for gold (racial, faction and reputation mounts), just above vendor price. Players can't list these, but buying one on the auction house saves a trip. They bind to the buyer.
+local VendorMountsForTokens = false         -- Default: False. With SellVendorMounts, also sells vendor mounts that cost marks, honor or other tokens instead of gold, at MountPriceRanges prices.
+local VendorMountMarkup     = {1.1, 1.5}    -- Default: 1.1, 1.5. Vendor mounts are priced at 110-150% of their vendor price.
+local MountPriceRanges      = {[3] = {10000000, 20000000}, [4] = {50000000, 100000000}}  -- Default: Rare 1000-2000g, Epic 5000-10000g (in copper). Price range for mounts without a gold vendor price: tradeable trading card and crafted mounts, and token vendor mounts.
 local VendorPriceMultiplier = {4, 8}        -- Default: 4, 8. Items the cost formula prices under 10s are priced at this many times their vendor sell price instead. Items are never priced below 1.25x vendor price.
 local HumanizePrices        = true          -- Default: True. Rounds prices like players type them, e.g. 4g 95s or 24g 99s 99c instead of 4g 37s 12c.
 local MarketPrices          = true          -- Default: True. Remembers a price factor per item and auction house: raised when the bot's listings sell, lowered when they expire unsold.
@@ -356,7 +360,12 @@ if EnableItemFilters then
     if SellAllAuctionableItems then
         -- Mirror the core's auction house listing rules (AuctionHouseHandler): soulbound,
         -- account bound, conjured and limited duration items can't be auctioned.
-        table.insert(conditions, "bonding NOT IN (1, 4, 5)")
+        local bindCondition = "bonding NOT IN (1, 4, 5)"
+        if SellVendorMounts then -- Bind on Pickup mounts sold by a vendor, for gold unless VendorMountsForTokens
+            bindCondition = "(" .. bindCondition .. " OR (class = 15 AND subclass = 5 AND bonding = 1 AND entry IN (SELECT item FROM npc_vendor WHERE item > 0" ..
+                (VendorMountsForTokens and "" or " AND ExtendedCost = 0") .. ")))"
+        end
+        table.insert(conditions, bindCondition)
         table.insert(conditions, "(flags & 134217728) = 0")
         table.insert(conditions, "(flags & 2) = 0")
         table.insert(conditions, "duration = 0")
@@ -842,6 +851,16 @@ local function CalculateItemCost(item, formula)
         if priceRange then
             -- Ranges are per full stack, cost is per unit
             cost = math.random(priceRange[1], priceRange[2]) / math.max(1, item.stackable)
+        end
+    end
+
+    -- Mounts: their vendor prices are token amounts, which the formulas badly undervalue
+    if item.class == 15 and item.subclass == 5 then
+        if item.bonding == 1 and item.BuyPrice > 0 then -- Sold by a vendor for gold
+            cost = item.BuyPrice * randomFloatBetween(VendorMountMarkup[1], VendorMountMarkup[2])
+        elseif MountPriceRanges and MountPriceRanges[item.Quality] then
+            local range = MountPriceRanges[item.Quality]
+            cost = math.max(cost, math.random(range[1], range[2]))
         end
     end
     
