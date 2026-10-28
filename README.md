@@ -44,6 +44,7 @@
 
 <h3>Item Filters</h3>
 <ul>
+	<li><strong>Sell All Auctionable Items</strong> - When enabled (default), the bot can sell every item a player could list on the auction house (anything not soulbound, account bound, conjured or timed). Only unobtainable placeholder/test items, <code>NeverSellIDs</code> and the expansion lock still apply. Disable it to use the curated filters below.</li>
 	<li><strong>Allowed Qualities</strong> - Configures the allowed item qualities for sale (e.g., Common, Rare, Epic).</li>
 	<li><strong>Allowed Classes</strong> - Specifies which class items can be sold.</li>
 	<li><strong>Allowed Races</strong> - Configures which races' items can be sold.</li>

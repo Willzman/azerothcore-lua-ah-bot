@@ -66,6 +66,7 @@ local SetAsCraftedBy        = true          -- Default: True. Marks items create
 -- General Item Filters
 local Expansion              = 0                   -- Default: 0 (no expansion lock). Possible values: 0 (no expansion lock), 1 (Vanilla, patch 1.12), 2 (TBC, patch 2.4.3), 3 (WotLK, patch 3.3.5a). Any expansion filter makes bots includes all items in the item_template database table per expansion.
 local EnableItemFilters      = true                -- Default: True. Disable only for debugging.
+local SellAllAuctionableItems = true               -- Default: True. Sells every item a player could list on the AH: everything that isn't soulbound (BoP/quest bound), account bound, conjured or timed. Only unobtainable placeholder/test items, NeverSellIDs and the Expansion setting are still filtered. Overrides all filters below until the weights section. Set to false to use the curated filters below instead.
 local AllowDeprecated        = false               -- Default: False. Items with flag 16 (Deprecated) or name like NPC, zzOLD, etc. will not be sold.
 local AllowedBinds           = {0, 2, 3}           -- Default: 0, 2, 3. 0 = no bounds, 1 = Bind on Pickup, 2 = Bind on Equip, 3 = Bind on Use, 4-5 Quest Items (see also AllowQuestItems to control quest item sales).
 local AllowBindOnAccount     = false               -- Default: False. Decides whether BoA items (e.g., hierlooms) can be sold by the AH bot.
@@ -114,23 +115,23 @@ local AllowConjured            = false                           -- Default: Fal
 -- Each weight number must be an integer, otherwise its category will be skipped
 local ItemWeights = {
     Gear = {
-        ["Gray/Poor"]            = 0,
+        ["Gray/Poor"]            = 1,
         ["White/Common"]         = 1,
         ["Green/Uncommon"]       = 25,
         ["Blue/Rare"]            = 15,
         ["Purple/Epic"]          = 5,
-        ["Orange/Legendary"]     = 0,
-        ["Red/Artifact"]         = 0,
+        ["Orange/Legendary"]     = 1,
+        ["Red/Artifact"]         = 1,
         ["Gold/Heirloom"]        = 0
     },
     Mats = {
-        ["Gray/Poor"]            = 0,
+        ["Gray/Poor"]            = 1,
         ["White/Common"]         = 2,
         ["Green/Uncommon"]       = 30,
         ["Blue/Rare"]            = 10,
         ["Purple/Epic"]          = 1,
-        ["Orange/Legendary"]     = 0,
-        ["Red/Artifact"]         = 0,
+        ["Orange/Legendary"]     = 1,
+        ["Red/Artifact"]         = 1,
         ["Gold/Heirloom"]        = 0
     },
     Glyph = 10,
@@ -298,113 +299,130 @@ if EnableItemFilters then
         table.insert(conditions, "NOT entry IN (" .. table.concat(NeverSellIDs, ',') .. ")")
     end
     
-    -- Container size filter
-    if MinContainerSize then
-        table.insert(conditions, "NOT ((class = 1 OR class = 11) AND ContainerSlots < "..MinContainerSize..")")
-    end
-    
-    -- Class restrictions
-    if AllowedClassItems then
-        local classFilter = AllowGlyphs and "(class = 16 OR AllowableClass IN (" or "(AllowableClass IN ("
-        table.insert(conditions, classFilter .. table.concat(AllowedClassItems, ',') .. "))")
-    end
-    
-    -- Race restrictions
-    for _, raceGroup in ipairs({{AllowedHordeRaces}, {AllowedAllyRaces}}) do
-        if raceGroup[1] then
-            table.insert(conditions, "AllowableRace IN (" .. table.concat(raceGroup[1], ',') .. ")")
+    if SellAllAuctionableItems then
+        -- Mirror the core's auction house listing rules (AuctionHouseHandler): soulbound,
+        -- account bound, conjured and limited duration items can't be auctioned.
+        table.insert(conditions, "bonding NOT IN (1, 4, 5)")
+        table.insert(conditions, "(flags & 134217728) = 0")
+        table.insert(conditions, "(flags & 2) = 0")
+        table.insert(conditions, "duration = 0")
+        -- Items flagged deprecated or named as placeholders/tests/NPC gear exist in item_template but not in the game.
+        table.insert(conditions, "(flags & 16) = 0")
+        local placeholderNames = {
+            "'%zzOLD%'", "'OLD%'", "'%[PH]%'", "'%(PH)%'", "'%NPC%'", "'%QA%'", "'%TEST%'", "'Test %'",
+            "'%Deprecated%'", "'%DEPRECATED%'", "'%Deptecated%'", "'%Unused%'", "'%UNUSED%'",
+            "'Monster -%'", "'%90 Epic%'", "'%90 Blue%'", "'%90 Green%'"
+        }
+        table.insert(conditions, "BINARY name NOT LIKE " .. table.concat(placeholderNames, " AND BINARY name NOT LIKE "))
+    else
+        -- Container size filter
+        if MinContainerSize then
+            table.insert(conditions, "NOT ((class = 1 OR class = 11) AND ContainerSlots < "..MinContainerSize..")")
         end
-    end
     
-    -- Boolean filters with class/subclass/flag checks
-    local booleanFilters = {
-        {not AllowRecipes, "NOT (class = 9)"},
-        {not AllowCompanions, "NOT (class = 15 and subclass = 2)"},
-        {not AllowMounts, "NOT (class = 15 and subclass = 5)"},
-        {not AllowReputationItems, "RequiredReputationFaction = 0"},
-        {not AllowKeys, {"(BagFamily & 256) = 0", "NOT (class = 13 and subclass = 0)"}},
-        {not AllowConjured, "(flags & 2) = 0"},
-        {not AllowMisc, {"(BagFamily & 4) = 0", "(BagFamily & 2048) = 0", "NOT (class = 15 and subclass = 4)"}},
-        {not AllowQuestItems, {"(BagFamily & 16384) = 0", "NOT class = 12"}},
-        {not AllowLockpicking, "NOT (class = 13 and subclass = 1)"},
-        {not AllowConsumables, "NOT (class = 0)"},
-        {not AllowCommonAmmo, "NOT (class = 6 and quality < 2)"},
-        {not AllowHolidayItems, {"NOT (class = 15 and subclass = 3)", "HolidayId = 0"}},
-        {not AllowBindOnAccount, "(flags & 134217728) = 0"}
-    }
+        -- Class restrictions
+        if AllowedClassItems then
+            local classFilter = AllowGlyphs and "(class = 16 OR AllowableClass IN (" or "(AllowableClass IN ("
+            table.insert(conditions, classFilter .. table.concat(AllowedClassItems, ',') .. "))")
+        end
     
-    for _, filter in ipairs(booleanFilters) do
-        if filter[1] then
-            if type(filter[2]) == "table" then
-                for _, condition in ipairs(filter[2]) do
-                    table.insert(conditions, condition)
-                end
-            else
-                table.insert(conditions, filter[2])
+        -- Race restrictions
+        for _, raceGroup in ipairs({{AllowedHordeRaces}, {AllowedAllyRaces}}) do
+            if raceGroup[1] then
+                table.insert(conditions, "AllowableRace IN (" .. table.concat(raceGroup[1], ',') .. ")")
             end
         end
-    end
     
-    -- Quality and binding filters
-    if AllowedBinds then
-        table.insert(conditions, "bonding IN (" .. table.concat(AllowedBinds, ',') .. ")")
-    end
-    if AllowedQualities then
-        table.insert(conditions, "quality IN (" .. table.concat(AllowedQualities, ',') .. ")")
-    end
-    
-    -- Level filters
-    if MaxLevel then
-        table.insert(conditions, "RequiredLevel <= ".. MaxLevel)
-    end
-    if MinLevelConsumables then
-        table.insert(conditions, "NOT (class = 0 AND RequiredLevel < " .. MinLevelConsumables .. ")")
-    end
-    if MinLevelGear then
-        table.insert(conditions, "NOT ((class = 4 OR class = 2) AND RequiredLevel < " .. MinLevelGear .. ")")
-    end
-    
-    -- Deprecated items filter
-    if not AllowDeprecated then
-        table.insert(conditions, "(flags & 16) = 0")
-        table.insert(conditions, "NOT (class = 8 and subclass = 0)")
-        table.insert(conditions, "NOT (class = 10 and subclass = 0)")
-        table.insert(conditions, "NOT ((class = 11 and subclass = 0) OR (class = 11 and subclass = 1))")
-        
-        -- Consolidated name exclusions
-        local nameExclusions = {
-            "'%OLD%'", "'%NPC%'", "'%QA%'", "'%enchant ring%'", "'%tablet%'", "'%throwing dagger%'",
-            "'%shot pouch%'", "'%brimstone%'", "'%small pouch%'", "'%stormjewel%'", "'%dye%'",
-            "'%feathers of azeroth%'", "'%broken%throwing%'", "'%northrend meat%'", "'%ironwood seed%'",
-            "'%stranglethorn seed%'", "'%simple wood%'", "'%small sack of coins%'", "'%slimy bag%'",
-            "'%bleach%'", "'%oozing bag%'", "'%Pale Skinner%'", "'%Pioneer Buckler%'", "'%locust wing%'",
-            "'%community token%'", "'%thick citrine%'", "'%brilliant citrine%'", "'%nightbloom lilac%'",
-            "'%flour%'", "'%brew%'", "'%[PH]%'", "'%(PH)%'", "'%fishing -%'", "'%Sandy Scorpid Claw%'",
-            "'% caster %'", "'%Jeweler''s Kit%'", "'%nightmare berries%'", "'%parchment%'",
-            "'%light quiver%'", "'%honey%'", "'%explosive shell%'", "'%envelope%'", "'%equipment kit%'",
-            "'%/%'", "'%2.0%'", "'%creeping anguish%'", "'%felcloth bag%'", "'%elementium ore%'",
-            "'%unused%'", "'%lava core%'", "'%fiery core%'", "'%sulfuron ingot%'", "'%sak%'",
-            "'%gigantique%'", "'%portable hole%'", "'%deptecated%'", "'%durability%'", "'%big sack%'",
-            "'%decoded%'", "'%knowledge:%'", "'%manual%'", "'%gnome head%'", "'%box of%'",
-            "'%Light Feather%'", "'%Pet Stone%'", "'%Ogrela%'", "'%cache of%'", "'%summoning%'",
-            "'%cut %'", "'%turtle egg%'", "'%jillian%'", "'%heavy crate%'", "'%plain letter%'",
-            "'%sack of gems%'", "'%plans: darkspear%'", "'%beetle husk%'", "'%froststeel bar%'",
-            "'%firefly dust%'", "'%of swords%'", "'%gnomish alarm%'", "'%tome%'", "'%ornate spyglass%'",
-            "'%test%'", "'%darkmoon prize%'", "'%frostmourne%'", "'%codex%'", "'%the fall of ameth%'",
-            "'%frostwolf artichoke%'", "'%symbol of kings%'", "'%symbol of divinity%'", "'%word of thawing%'",
-            "'%grimoire%'", "'%deprecated%'", "'%cowardly flight%'", "'%book%'", "'%libram%'",
-            "'%brazie''s%'", "'%guide%'", "'%glyphed breastplate%'", "'%weak flux%'", "'%leatherworking%'",
-            "'%walnut stock%'", "'%virtuoso inking%'", "'%dictionary%'", "'%moonlit katana%'",
-            "'%Omar%'", "'%depleted%'", "'%bottomless inscription bag%'", "'%90 Epic%'", "'%90 Blue%'",
-            "'%90 Green%'", "'%blood shard%'", "'%dampscale basilisk eye%'", "'%evil bat eye%'",
-            "'%package%'", "'%signet of beckoning%'", "'%silithid carapace%'", "'%smoke beacon%'",
-            "'%shadoweave belt%'", "'%snickerfang jowl%'", "'%mojo%'", "'%singed%'"
+        -- Boolean filters with class/subclass/flag checks
+        local booleanFilters = {
+            {not AllowRecipes, "NOT (class = 9)"},
+            {not AllowCompanions, "NOT (class = 15 and subclass = 2)"},
+            {not AllowMounts, "NOT (class = 15 and subclass = 5)"},
+            {not AllowReputationItems, "RequiredReputationFaction = 0"},
+            {not AllowKeys, {"(BagFamily & 256) = 0", "NOT (class = 13 and subclass = 0)"}},
+            {not AllowConjured, "(flags & 2) = 0"},
+            {not AllowMisc, {"(BagFamily & 4) = 0", "(BagFamily & 2048) = 0", "NOT (class = 15 and subclass = 4)"}},
+            {not AllowQuestItems, {"(BagFamily & 16384) = 0", "NOT class = 12"}},
+            {not AllowLockpicking, "NOT (class = 13 and subclass = 1)"},
+            {not AllowConsumables, "NOT (class = 0)"},
+            {not AllowCommonAmmo, "NOT (class = 6 and quality < 2)"},
+            {not AllowHolidayItems, {"NOT (class = 15 and subclass = 3)", "HolidayId = 0"}},
+            {not AllowBindOnAccount, "(flags & 134217728) = 0"}
         }
+    
+        for _, filter in ipairs(booleanFilters) do
+            if filter[1] then
+                if type(filter[2]) == "table" then
+                    for _, condition in ipairs(filter[2]) do
+                        table.insert(conditions, condition)
+                    end
+                else
+                    table.insert(conditions, filter[2])
+                end
+            end
+        end
+    
+        -- Quality and binding filters
+        if AllowedBinds then
+            table.insert(conditions, "bonding IN (" .. table.concat(AllowedBinds, ',') .. ")")
+        end
+        if AllowedQualities then
+            table.insert(conditions, "quality IN (" .. table.concat(AllowedQualities, ',') .. ")")
+        end
+    
+        -- Level filters
+        if MaxLevel then
+            table.insert(conditions, "RequiredLevel <= ".. MaxLevel)
+        end
+        if MinLevelConsumables then
+            table.insert(conditions, "NOT (class = 0 AND RequiredLevel < " .. MinLevelConsumables .. ")")
+        end
+        if MinLevelGear then
+            table.insert(conditions, "NOT ((class = 4 OR class = 2) AND RequiredLevel < " .. MinLevelGear .. ")")
+        end
+    
+        -- Deprecated items filter
+        if not AllowDeprecated then
+            table.insert(conditions, "(flags & 16) = 0")
+            table.insert(conditions, "NOT (class = 8 and subclass = 0)")
+            table.insert(conditions, "NOT (class = 10 and subclass = 0)")
+            table.insert(conditions, "NOT ((class = 11 and subclass = 0) OR (class = 11 and subclass = 1))")
         
-        table.insert(conditions, "UPPER(NAME) NOT LIKE " .. table.concat(nameExclusions, " AND UPPER(NAME) NOT LIKE "))
-        table.insert(conditions, "NAME NOT LIKE '% Crate %' AND NAME NOT LIKE 'Crate %' AND NAME NOT LIKE '% Crate'")
-        table.insert(conditions, "NOT (CLASS = 15 AND NAME LIKE '%throw%')")
-        table.insert(conditions, "NOT (NAME LIKE '%broken%' AND NAME LIKE '%throwing%')")
+            -- Consolidated name exclusions
+            local nameExclusions = {
+                "'%OLD%'", "'%NPC%'", "'%QA%'", "'%enchant ring%'", "'%tablet%'", "'%throwing dagger%'",
+                "'%shot pouch%'", "'%brimstone%'", "'%small pouch%'", "'%stormjewel%'", "'%dye%'",
+                "'%feathers of azeroth%'", "'%broken%throwing%'", "'%northrend meat%'", "'%ironwood seed%'",
+                "'%stranglethorn seed%'", "'%simple wood%'", "'%small sack of coins%'", "'%slimy bag%'",
+                "'%bleach%'", "'%oozing bag%'", "'%Pale Skinner%'", "'%Pioneer Buckler%'", "'%locust wing%'",
+                "'%community token%'", "'%thick citrine%'", "'%brilliant citrine%'", "'%nightbloom lilac%'",
+                "'%flour%'", "'%brew%'", "'%[PH]%'", "'%(PH)%'", "'%fishing -%'", "'%Sandy Scorpid Claw%'",
+                "'% caster %'", "'%Jeweler''s Kit%'", "'%nightmare berries%'", "'%parchment%'",
+                "'%light quiver%'", "'%honey%'", "'%explosive shell%'", "'%envelope%'", "'%equipment kit%'",
+                "'%/%'", "'%2.0%'", "'%creeping anguish%'", "'%felcloth bag%'", "'%elementium ore%'",
+                "'%unused%'", "'%lava core%'", "'%fiery core%'", "'%sulfuron ingot%'", "'%sak%'",
+                "'%gigantique%'", "'%portable hole%'", "'%deptecated%'", "'%durability%'", "'%big sack%'",
+                "'%decoded%'", "'%knowledge:%'", "'%manual%'", "'%gnome head%'", "'%box of%'",
+                "'%Light Feather%'", "'%Pet Stone%'", "'%Ogrela%'", "'%cache of%'", "'%summoning%'",
+                "'%cut %'", "'%turtle egg%'", "'%jillian%'", "'%heavy crate%'", "'%plain letter%'",
+                "'%sack of gems%'", "'%plans: darkspear%'", "'%beetle husk%'", "'%froststeel bar%'",
+                "'%firefly dust%'", "'%of swords%'", "'%gnomish alarm%'", "'%tome%'", "'%ornate spyglass%'",
+                "'%test%'", "'%darkmoon prize%'", "'%frostmourne%'", "'%codex%'", "'%the fall of ameth%'",
+                "'%frostwolf artichoke%'", "'%symbol of kings%'", "'%symbol of divinity%'", "'%word of thawing%'",
+                "'%grimoire%'", "'%deprecated%'", "'%cowardly flight%'", "'%book%'", "'%libram%'",
+                "'%brazie''s%'", "'%guide%'", "'%glyphed breastplate%'", "'%weak flux%'", "'%leatherworking%'",
+                "'%walnut stock%'", "'%virtuoso inking%'", "'%dictionary%'", "'%moonlit katana%'",
+                "'%Omar%'", "'%depleted%'", "'%bottomless inscription bag%'", "'%90 Epic%'", "'%90 Blue%'",
+                "'%90 Green%'", "'%blood shard%'", "'%dampscale basilisk eye%'", "'%evil bat eye%'",
+                "'%package%'", "'%signet of beckoning%'", "'%silithid carapace%'", "'%smoke beacon%'",
+                "'%shadoweave belt%'", "'%snickerfang jowl%'", "'%mojo%'", "'%singed%'"
+            }
+        
+            table.insert(conditions, "UPPER(NAME) NOT LIKE " .. table.concat(nameExclusions, " AND UPPER(NAME) NOT LIKE "))
+            table.insert(conditions, "NAME NOT LIKE '% Crate %' AND NAME NOT LIKE 'Crate %' AND NAME NOT LIKE '% Crate'")
+            table.insert(conditions, "NOT (CLASS = 15 AND NAME LIKE '%throw%')")
+            table.insert(conditions, "NOT (NAME LIKE '%broken%' AND NAME LIKE '%throwing%')")
+        end
     end
 
     if #conditions > 0 then
